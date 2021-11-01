@@ -1,15 +1,22 @@
+# Makefile to build Teensy 3.x programs without the need to use Arduino/Teensyduino IDE
+# It can opened as Makefile project in CLion.
+#
+# original source: https://github.com/apmorton/teensy-template/blob/master/Makefile
+# see also: https://github.com/PaulStoffregen/cores/blob/master/teensy3/Makefile
+#
+
 # The name of your project (used to name the compiled .hex file)
 TARGET = $(notdir $(CURDIR))
 
-# The teensy version to use, 30, 31, 35, 36, or LC
-TEENSY = 30
+# The teensy version to use, 30, 31, 32, 35, 36, or LC
+TEENSY = 32
 
 # Set to 24000000, 48000000, or 96000000 to set CPU core speed
 TEENSY_CORE_SPEED = 48000000
 
 # Some libraries will require this to be defined
 # If you define this, you will break the default main.cpp
-#ARDUINO = 10600
+# ARDUINO = 10600
 
 # configurable options
 OPTIONS = -DUSB_SERIAL -DLAYOUT_US_ENGLISH
@@ -24,24 +31,19 @@ BUILDDIR = $(abspath $(CURDIR)/build)
 #************************************************************************
 
 # path location for Teensy Loader, teensy_post_compile and teensy_reboot
-TOOLSPATH = $(CURDIR)/tools
-
-ifeq ($(OS),Windows_NT)
-    $(error What is Win Dose?)
-else
-    UNAME_S := $(shell uname -s)
-    ifeq ($(UNAME_S),Darwin)
-        TOOLSPATH = /Applications/Arduino.app/Contents/Java/hardware/tools/
-    endif
-endif
+TOOLSPATH = /Applications/Teensyduino.app/Contents/Java/hardware/tools
 
 # path location for Teensy 3 core
+# copied from https://github.com/PaulStoffregen/cores/tree/master/teensy3
+# see scripts/update-teensy3-core.sh
 COREPATH = teensy3
 
 # path location for Arduino libraries
 LIBRARYPATH = libraries
 
-# path location for the arm-none-eabi compiler
+# path location for the arm-none-eabi compiler (normally it's shipped together with the Teensy tools)
+# note: The shipped-with-Teensy gcc version is a bit outdated,
+#       but it is compatible with the Teensy' core lib code (newer gcc might not be).
 COMPILERPATH = $(TOOLSPATH)/arm/bin
 
 #************************************************************************
@@ -68,7 +70,8 @@ ifeq ($(TEENSY), 30)
     CPPFLAGS += -D__MK20DX128__ -mcpu=cortex-m4
     LDSCRIPT = $(COREPATH)/mk20dx128.ld
     LDFLAGS += -mcpu=cortex-m4 -T$(LDSCRIPT)
-else ifeq ($(TEENSY), 31)
+# Teensy 3.1 and Teensy 3.2 are same (in terms of MCU type)
+else ifeq ($(TEENSY), $(filter $(TEENSY),31 32))
     CPPFLAGS += -D__MK20DX256__ -mcpu=cortex-m4
     LDSCRIPT = $(COREPATH)/mk20dx256.ld
     LDFLAGS += -mcpu=cortex-m4 -T$(LDSCRIPT)
@@ -88,14 +91,17 @@ else ifeq ($(TEENSY), 36)
     LDFLAGS += -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16 -T$(LDSCRIPT)
     LIBS += -larm_cortexM4lf_math
 else
-    $(error Invalid setting for TEENSY)
+    # NOTE: The following must be indented with spaces (not with tabs) otherwise
+    #       make (at least on macOS) fails with an error:
+    #         Makefile:97: *** commands commence before first target.  Stop.
+    $(error Invalid setting TEENSY=$(TEENSY))
 endif
 
 # set arduino define if given
 ifdef ARDUINO
-	CPPFLAGS += -DARDUINO=$(ARDUINO)
+    CPPFLAGS += -DARDUINO=$(ARDUINO)
 else
-	CPPFLAGS += -DUSING_MAKEFILE
+    CPPFLAGS += -DUSING_MAKEFILE
 endif
 
 # names for the compiler programs
@@ -161,6 +167,17 @@ $(TARGET).elf: $(OBJS) $(LDSCRIPT)
 -include $(OBJS:.o=.d)
 
 clean:
-	@echo Cleaning...
+	@echo "Cleaning..."
 	@rm -rf "$(BUILDDIR)"
 	@rm -f "$(TARGET).elf" "$(TARGET).hex"
+
+update-teensy3-core:
+	@echo "Updating teensy3..."
+	./scripts/update-teensy3-core.sh
+
+download-teensy-tools:
+	@echo "Downloading Teensy tools for your OS..."
+	./scripts/download-teensy-tools.sh
+
+# see https://www.gnu.org/software/make/manual/html_node/Phony-Targets.html
+.PHONY: clean all build hex post_compile reboot update-teensy3-core download-teensy-tools
