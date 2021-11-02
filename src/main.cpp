@@ -250,17 +250,26 @@ void ftm1_isr() {
  */
 void setupFTM1() {
 
+	// Useful info:
+	// [K20P64M72SF1RM]
+	//   K20 Sub-Family Reference Manual (MK20DX64VLH7, MK20DX128VLH7, MK20DX256VLH7)
+	//   Document Number: K20P64M72SF1RM
+	//   note that Teensy 3.2 has Freescale/NXP MK20DX256VLH7 (Cortex-M4)
+	//                            (Freescale was acquired by NXP in 2015)
+
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
 
-	// TODO: document the meaning of the values
-	CORE_PIN3_CONFIG = PORT_PCR_MUX(3);
-	CORE_PIN4_CONFIG = PORT_PCR_MUX(3);
+	// Select alternative function 3 for pins 3 and 4 to be FTM1_CH0 and FTM1_CH1 respectively:
+	//   Teensy pin 3 is PTA12 (configured via PORTA_PCR12)
+	//   Teensy pin 3 is PTA13 (configured via PORTA_PCR13)
+	//   see Chapter 11: Port control and interrupts (PORT)
+	//       and also Chapter 10: Signal Multiplexing and Signal Descriptions
+	CORE_PIN3_CONFIG = PORT_PCR_MUX(3); // alternative function 3 of pin 3 is FTM1_CH0
+	CORE_PIN4_CONFIG = PORT_PCR_MUX(3); // alternative function 4 of pin 3 is FTM1_CH1
 
-	// see K20 Sub-Family Reference Manual (MK20DX64VLH7, MK20DX128VLH7, MK20DX256VLH7)
-	//     Document Number: K20P64M72SF1RM
-	//     Chapter 36: FlexTimer Module (FTM)
-	// note that Teensy 3.2 has Freescale/NXP MK20DX256VLH7 (Cortex-M4)
-	//                          (Freescale was acquired by NXP in 2015)
+	// Configure FlexTimer Module 1 so that it can be used
+	// to read input PWM signals of a known frequency (91 Hz, PWM_FREQUENCY)
+	//   see Chapter 36: FlexTimer Module (FTM) in [K20P64M72SF1RM]
 
 	// TODO: document the meaning of the values
 	FTM1_SC = 0;
@@ -274,14 +283,17 @@ void setupFTM1() {
 	FTM1_C0SC = FTM_CSC_RAISING;
 	FTM1_C1SC = FTM_CSC_RAISING;
 
-	// Freescale/NXP MK20DX256VLH7 supports only 16 priority levels
-	// (even though Cortex-M4 can support up to 256 priority levels, but vendors/implementers can reduce their number)
-	// see Section 3.2.2.1 Interrupt priority levels in K20 Sub-Family Reference Manual (K20P64M72SF1RM)
-	// see Section 4.2.7 in Cortex-M4 Generic User Guide (ARM DUI 0553B (ID012616))
-	// BTW: teensy3/mk20dx128.c startup code in ResetHandler sets all interrupts to medium priority level (128)
-	// TODO: There was bug in the code: priority 1 is not supported and will result in priority 0
-	//       (priority is 8 bits but only the 4 high-order bits are implemented on MK20DX256VLH7,
-	//        the 4 low-order bits are ignored)
+	// Change priority of FTM1's generated interrupt:
+	//   Freescale/NXP MK20DX256VLH7 supports only 16 priority levels
+	//   (even though Cortex-M4 can support up to 256 priority levels,
+	//    but vendors/implementers can reduce their number)
+	//   see Section 3.2.2.1 Interrupt priority levels in [K20P64M72SF1RM]
+	//   see Section 4.2.7 in Cortex-M4 Generic User Guide (ARM DUI 0553B (ID012616))
+	//   NOTE: teensy3/mk20dx128.c startup code in ResetHandler sets all interrupts to medium priority level (128)
+	//   TODO: There was bug in the older main.cpp code:
+	//           Priority 1 is not supported and setting such value results in priority 0.
+	//           (Reason: priority is 8 bits but only the 4 high-order bits are implemented on MK20DX256VLH7,
+	//            the 4 low-order bits are ignored.)
 	NVIC_SET_PRIORITY(IRQ_FTM1, 0); // 0 = highest priority
 
 	NVIC_ENABLE_IRQ(IRQ_FTM1);
