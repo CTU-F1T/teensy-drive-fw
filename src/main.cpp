@@ -1,28 +1,368 @@
-#include "WProgram.h"
+#include <Arduino.h>
+#include "version.h"
+#include "config.h"
 
-extern "C" int main(void)
-{
-#ifdef USING_MAKEFILE
+// Input capture FTM register values
+#define FTM_SC_VALUE (FTM_SC_TOIE | FTM_SC_CLKS(1) | FTM_SC_PS(0))
+#define FTM_CSC_RAISING (FTM_CSC_CHIE | FTM_CSC_ELSA)
+#define FTM_CSC_FALLING (FTM_CSC_CHIE | FTM_CSC_ELSB)
 
-	// To use Teensy 3.0 without Arduino, simply put your code here.
-	// For example:
+// Input capture helper variables
+static volatile uint32_t duty_cycle_channel_0 = 0;
+static volatile uint32_t duty_cycle_c1 = 0;
+static volatile uint32_t channel_0_done = 0;
+static volatile uint32_t channel_1_done = 0;
 
-	pinMode(13, OUTPUT);
-	while (1) {
-		digitalWriteFast(13, HIGH);
-		delay(500);
-		digitalWriteFast(13, LOW);
-		delay(500);
+// App state
+
+static volatile boolean flagStop = false;
+static volatile boolean flagManualOverride = true;
+static volatile boolean vescMode = false;
+
+elapsedMillis modeSwitchBtnElapsed;
+elapsedMillis manual_blink_elapsed;
+elapsedMillis drive_msg_recv_elapsed;
+elapsedMillis ftm_irq_elapsed;
+
+//
+
+// Measured values (v2):
+//   TRIM STEERING - CALM STATE
+//       left: 8247, right: 9622
+//       => str_center_value = avg() = 8934; using 9361
+//       => str boundaries: using corrected center +- 300
+//
+//   TRIM THROTTLE - CALM STATE
+//       backward: 9618, forward: 8240
+//       => thr_center_value = avg() = 8929; not driving for +- 250
+//       => thr boundaries: using center +- 200
+//
+//   TRIM STEERING left
+//       RATE MIN
+//           left: 7799, right: 8950
+//       RATE MAX
+//           left: 6000, right: 11674
+//       => str_lowerlimit = 6000
+//
+//   TRIM STEERING right
+//       RATE MIN
+//           left: 8901, right: 10600
+//       RATE MAX
+//           left: 6014, right: 11764
+//       => str_upperlimit = 11764
+//
+//   TRIM THROTTLE backward
+//       backward: 11312, forward: 6567
+//           thr_upperlimit = 11312
+//
+//   TRIM THROTTLE forward
+//       backward: 11312, forward: 6567
+//           thr_lowerlimit = 6567
+//
+
+// Measured important PWM duty cycle values
+#define PWM_FREQUENCY 91
+// defined in 'config.h':
+//
+//   #define pwm_str_lowerlimit    6000  //  10% duty cycle - V1 7000
+//   #define pwm_str_center_value  9361  //  15% duty cycle - V1 8611
+//   #define pwm_str_upperlimit   11764  //  20% duty cycle - V1 10684
+//
+//   #define pwm_thr_lowerlimit    6567  //  10% duty cycle - V1 6458
+//   #define pwm_thr_center_value  8929  //  15% duty cycle - V1 8850
+//   #define pwm_thr_upperlimit   11312  //  20% duty cycle - V1 11241
+//
+
+#define PIN_STEERING_OUTPUT 6
+#define PIN_STEERING_INPUT 3
+#define PIN_THROTTLE_OUTPUT 5
+#define PIN_THROTTLE_INPUT 4
+
+#define PIN_13_LED 13
+
+void messageDrive(int16_t pwm_drive, int16_t pwm_angle) {
+
+	if (!flagStop && !flagManualOverride) {
+		if ((pwm_thr_center_upper < pwm_drive || pwm_drive < pwm_thr_center_lower) && vescMode) {
+			NVIC_DISABLE_IRQ(IRQ_FTM1);
+			analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
+			NVIC_ENABLE_IRQ(IRQ_FTM1);
+			delay(80);
+			vescMode = false;
+		}
+
+		NVIC_DISABLE_IRQ(IRQ_FTM1);
+		if (!vescMode) {
+			if (pwm_drive < pwm_thr_lowerlimit) {
+				analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_lowerlimit); // Safety lower limit
+			} else if (pwm_drive > pwm_thr_upperlimit) {
+				analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_upperlimit); // Safety upper limit
+			} else {
+				analogWrite(PIN_THROTTLE_OUTPUT, pwm_drive); // Incoming data
+			}
+		}
+
+		if (pwm_angle < pwm_str_lowerlimit) {
+			analogWrite(PIN_STEERING_OUTPUT, pwm_str_lowerlimit); // Safety lower limit
+		} else if (pwm_angle > pwm_str_upperlimit) {
+			analogWrite(PIN_STEERING_OUTPUT, pwm_str_upperlimit); // Safety upper limit
+		} else {
+			analogWrite(PIN_STEERING_OUTPUT, pwm_angle); // Incoming data
+		}
+		NVIC_ENABLE_IRQ(IRQ_FTM1);
+
+		drive_msg_recv_elapsed = 0;
 	}
 
-
-#else
-	// Arduino's main() function just calls setup() and loop()....
-	setup();
-	while (1) {
-		loop();
-		yield();
-	}
-#endif
 }
 
+void messageEmergencyStop(bool flagValue) {
+
+	flagStop = flagValue;
+
+	NVIC_DISABLE_IRQ(IRQ_FTM1);
+	if (flagStop && !flagManualOverride) {
+		digitalWrite(PIN_13_LED, HIGH); // turn on led
+		analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
+		analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
+	}
+	NVIC_ENABLE_IRQ(IRQ_FTM1);
+
+	if (!flagStop) {
+		flagManualOverride = false;
+		vescMode = true;
+		digitalWrite(PIN_13_LED, LOW);
+	}
+
+}
+
+void ftm1_isr() {
+
+	static uint16_t capture_ovf_bits = 0;
+	static uint32_t prev_cap_c0 = 0;
+	static uint32_t prev_cap_c1 = 0;
+	static bool next_edge_falling_c0 = false;
+	static bool next_edge_falling_c1 = false;
+	static int LED_state = LOW;
+
+	bool overflowed = false;
+	uint32_t cap_val, status_reg_copy = FTM1_STATUS;
+	uint32_t pwm_high_c0, pwm_high_c1;
+
+	if (FTM1_SC & FTM_SC_TOF) {
+		FTM1_SC = FTM_SC_VALUE;
+		capture_ovf_bits++;
+		overflowed = true;
+	}
+
+	// event on channel 0
+	if (status_reg_copy & 0b01) {
+		cap_val = FTM1_C0V;
+		if (cap_val <= 0x8000 || !overflowed) {
+			cap_val |= capture_ovf_bits << 16;
+		} else {
+			cap_val |= (capture_ovf_bits - 1) << 16;
+		}
+		next_edge_falling_c0 = !next_edge_falling_c0;
+		FTM1_C0SC = next_edge_falling_c0 ? FTM_CSC_FALLING : FTM_CSC_RAISING;
+		if (next_edge_falling_c0) {
+			prev_cap_c0 = cap_val;
+		} else {
+			pwm_high_c0 = cap_val - prev_cap_c0;
+			// duty_cycle_c0 = (PWM_FREQUENCY * pwm_high_c0 * 65535) / F_BUS;
+			duty_cycle_channel_0 = (pwm_high_c0 * 12424) / 100000;
+
+			// Steering
+			if (!flagManualOverride &&
+				(
+					duty_cycle_channel_0 > pwm_str_center_upper || duty_cycle_channel_0 < pwm_str_center_lower
+				)) { // V1 - > 9000; < 8300
+				// TODO: publish via USB Serial
+				// estop_msg.data = true;
+				// estop_pub.publish(&estop_msg);
+
+				flagManualOverride = true;
+			}
+
+			if (flagManualOverride) {
+				analogWrite(PIN_STEERING_OUTPUT, (int) duty_cycle_channel_0);
+			}
+
+			channel_0_done = 1;
+		}
+	}
+
+	// event on channel 1
+	if (status_reg_copy & 0b10) {
+		cap_val = FTM1_C1V;
+		if (cap_val <= 0x8000 || !overflowed) {
+			cap_val |= capture_ovf_bits << 16;
+		} else {
+			cap_val |= (capture_ovf_bits - 1) << 16;
+		}
+		next_edge_falling_c1 = !next_edge_falling_c1;
+		FTM1_C1SC = next_edge_falling_c1 ? FTM_CSC_FALLING : FTM_CSC_RAISING;
+		if (next_edge_falling_c1) {
+			prev_cap_c1 = cap_val;
+		} else {
+			pwm_high_c1 = cap_val - prev_cap_c1;
+			// duty_cycle_c1 = (PWM_FREQUENCY * pwm_high_c1 * 65535) / F_BUS;
+			duty_cycle_c1 = (pwm_high_c1 * 12424) / 100000;
+
+			// Throttle
+			if (!flagManualOverride &&
+				(duty_cycle_c1 > pwm_thr_center_upper || duty_cycle_c1 < pwm_thr_center_lower)) { // V1 - > 9100; < 8800
+				// TODO: publish via USB Serial
+				// estop_msg.data = true;
+				// estop_pub.publish(&estop_msg);
+
+				flagManualOverride = true;
+			}
+
+			if (flagManualOverride) {
+				analogWrite(PIN_THROTTLE_OUTPUT, (int) duty_cycle_c1);
+			}
+
+			channel_1_done = 1;
+		}
+	}
+
+	if (flagManualOverride && manual_blink_elapsed > 250) {
+		if (LED_state == LOW) {
+			LED_state = HIGH;
+		} else {
+			LED_state = LOW;
+		}
+
+		digitalWrite(PIN_13_LED, LED_state);
+		manual_blink_elapsed = 0;
+	}
+
+	ftm_irq_elapsed = 0;
+
+}
+
+/**
+ * Setups FTM1 (FlexTimer Module 1)
+ * so it can be used to read PWM signals from radio receiver for
+ * ... steering ... input on pin 3
+ * ... throttle ... input on pin 4
+ */
+void setupFTM1() {
+
+	NVIC_DISABLE_IRQ(IRQ_FTM1);
+
+	// TODO: document the meaning of the values
+	CORE_PIN3_CONFIG = PORT_PCR_MUX(3);
+	CORE_PIN4_CONFIG = PORT_PCR_MUX(3);
+
+	// see K20 Sub-Family Reference Manual (MK20DX64VLH7, MK20DX128VLH7, MK20DX256VLH7)
+	//     Document Number: K20P64M72SF1RM
+	//     Chapter 36: FlexTimer Module (FTM)
+	// note that Teensy 3.2 has Freescale/NXP MK20DX256VLH7 (Cortex-M4)
+	//                          (Freescale was acquired by NXP in 2015)
+
+	// TODO: document the meaning of the values
+	FTM1_SC = 0;
+	FTM1_CNT = 0;
+	FTM1_MOD = 0xFFFF;
+	FTM1_SC = FTM_SC_VALUE;
+	FTM1_MODE = FTM_MODE_WPDIS;
+
+	// TODO: document the meaning of the values
+	FTM1_FILTER = FTM_FILTER_CH0FVAL(2) | FTM_FILTER_CH1FVAL(2);
+	FTM1_C0SC = FTM_CSC_RAISING;
+	FTM1_C1SC = FTM_CSC_RAISING;
+
+	// Freescale/NXP MK20DX256VLH7 supports only 16 priority levels
+	// (even though Cortex-M4 can support up to 256 priority levels, but vendors/implementers can reduce their number)
+	// see Section 3.2.2.1 Interrupt priority levels in K20 Sub-Family Reference Manual (K20P64M72SF1RM)
+	// see Section 4.2.7 in Cortex-M4 Generic User Guide (ARM DUI 0553B (ID012616))
+	// BTW: teensy3/mk20dx128.c startup code in ResetHandler sets all interrupts to medium priority level (128)
+	// TODO: There was bug in the code: priority 1 is not supported and will result in priority 0
+	//       (priority is 8 bits but only the 4 high-order bits are implemented on MK20DX256VLH7,
+	//        the 4 low-order bits are ignored)
+	NVIC_SET_PRIORITY(IRQ_FTM1, 0); // 0 = highest priority
+
+	NVIC_ENABLE_IRQ(IRQ_FTM1);
+
+}
+
+void setup() {
+
+	// this is config of PWM signal output pins
+	analogWriteFrequency(PIN_STEERING_OUTPUT, PWM_FREQUENCY);
+	analogWriteFrequency(PIN_THROTTLE_OUTPUT, PWM_FREQUENCY);
+	analogWriteResolution(16);
+	analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
+	analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
+
+	pinMode(PIN_13_LED, OUTPUT);
+	digitalWrite(PIN_13_LED, LOW); // turn off the LED
+
+	pinMode(2, INPUT); // TODO: What purpose has pin 2? Maybe it is connected to the PCB?
+
+	setupFTM1();
+
+	// nh.getHardware()->setBaud(115200);
+	//
+	// nh.initNode();
+	//
+	// nh.subscribe(sub_drive);
+	// nh.subscribe(sub_stop);
+	//
+	// nh.advertise(pwm_high);
+	// nh.advertise(estop_pub);
+	//
+	// // Following lines are effective only during first connecting. But why?
+	// // Wait until actually connected
+	// while (!nh.connected()) {
+	// 	nh.spinOnce();
+	// }
+	//
+	// nh.logwarn((String("Starting Teensy -- FW build ") + VERSION).c_str());
+
+}
+
+void loop() {
+
+	if (channel_0_done && channel_1_done) {
+		// TODO: publish via USB Serial
+		// pwm_high_msg.period_thr = duty_cycle_c1;
+		// pwm_high_msg.period_str = duty_cycle_c0;
+		// pwm_high.publish(&pwm_high_msg);
+
+		channel_0_done = 0;
+		channel_1_done = 0;
+	}
+
+	// TODO: nh.spinOnce(); (replace with USB Serial receive data check)
+
+	// drive command timeout
+	NVIC_DISABLE_IRQ(IRQ_FTM1);
+	if (vescMode && !flagManualOverride && !flagStop) {
+		// analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
+		analogWrite(PIN_THROTTLE_OUTPUT, 0);
+	} else if (
+		(!flagManualOverride && !flagStop && drive_msg_recv_elapsed > 300)
+		|| (flagManualOverride && ftm_irq_elapsed > 100)
+		) {
+		analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
+		analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
+	}
+	NVIC_ENABLE_IRQ(IRQ_FTM1);
+
+}
+
+int main() {
+
+	setup();
+
+	while (true) {
+		loop();
+		// yield(); // no need to call it as we are not interested in the events it produces
+	}
+
+	return 0;
+
+}

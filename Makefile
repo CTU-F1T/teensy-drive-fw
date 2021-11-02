@@ -179,5 +179,54 @@ download-teensy-tools:
 	@echo "Downloading Teensy tools for your OS..."
 	./scripts/download-teensy-tools.sh
 
+help:
+	@echo "Use 'build' to compile project and 'upload' to move it to Teensy!"
+	@echo "Specify target platform via 'make target-car=CAR_NAME build'."
+	@echo "You can also use 'init' to generate empty config file."
+
+check-config:
+	@if [ ! -f ./src/config.h ]; then \
+		echo "Generating 'src/config.h' as it is missing ..."; \
+		echo "// Config file for Teensy board\n\
+// Fill in parameters of a target car. You can find them on the platform\n\
+// and/or in redmine.\n\
+// Steering\n\
+#define pwm_str_center_value        // Straight\n\
+#define pwm_str_lowerlimit          // Lowest possible number\n\
+#define pwm_str_upperlimit          // Largest possible number\n\
+\n\
+// Values for switching auto<->manual modes\n\
+#define pwm_str_center_lower        // set this to pwm_str_center_value - 300\n\
+#define pwm_str_center_upper        // set this to pwm_str_center_value + 300\n\
+\n\
+// Throttle\n\
+#define pwm_thr_center_value        // Calm state\n\
+#define pwm_thr_lowerlimit          // Lowest possible number\n\
+#define pwm_thr_upperlimit          // Largest possible number\n\
+\n\
+// Values for switching auto<->manual modes\n\
+#define pwm_thr_center_lower        // set this to pwm_thr_center_value - 200\n\
+#define pwm_thr_center_upper        // set this to pwm_thr_center_value + 200" > src/config.h; \
+		echo "Config file generated. Fill in the parameters." >&2; \
+		exit 1; \
+	fi;
+
+check-car:
+ifdef target-car
+	@echo "Building project for" $(target-car)
+else
+	@echo "Building project for UNDEFINED car" >&2
+endif
+
+generate-version:
+	@echo "Generating 'version.h' ..."
+ifdef target-car
+	@./generate-version.sh "$(target-car)"
+else
+	@./generate-version.sh "undefined"
+endif
+
 # see https://www.gnu.org/software/make/manual/html_node/Phony-Targets.html
-.PHONY: clean all build hex post_compile reboot update-teensy3-core download-teensy-tools
+.PHONY: clean all build hex post_compile reboot
+.PHONY: update-teensy3-core download-teensy-tools
+.PHONY: help check-config check-car generate-version

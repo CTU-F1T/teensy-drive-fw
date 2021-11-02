@@ -34,3 +34,6 @@ Desktop.ini
 *.d
 *.hex
 *.elf
+
+/src/config.h
+/src/version.h
