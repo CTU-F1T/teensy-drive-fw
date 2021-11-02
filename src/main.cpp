@@ -14,17 +14,12 @@ static volatile uint32_t channel_0_done = 0;
 static volatile uint32_t channel_1_done = 0;
 
 // App state
-
 static volatile boolean flagStop = false;
 static volatile boolean flagManualOverride = true;
 static volatile boolean vescMode = false;
-
-elapsedMillis modeSwitchBtnElapsed;
 elapsedMillis manual_blink_elapsed;
-elapsedMillis drive_msg_recv_elapsed;
-elapsedMillis ftm_irq_elapsed;
-
-//
+elapsedMillis last_drive_msg_reception_elapsed;
+elapsedMillis last_ftm1_irq_elapsed;
 
 // Measured values (v2):
 //   TRIM STEERING - CALM STATE
@@ -60,9 +55,12 @@ elapsedMillis ftm_irq_elapsed;
 //           thr_lowerlimit = 6567
 //
 
-// Measured important PWM duty cycle values
+// The frequency of the input PWM signal is 91 Hz (measured by an oscilloscope).
+// Also used as the frequency of the output (generated) PWM signal.
 #define PWM_FREQUENCY 91
-// defined in 'config.h':
+
+// Measured important PWM duty cycle values:
+// (now defined in 'config.h')
 //
 //   #define pwm_str_lowerlimit    6000  //  10% duty cycle - V1 7000
 //   #define pwm_str_center_value  9361  //  15% duty cycle - V1 8611
@@ -73,56 +71,79 @@ elapsedMillis ftm_irq_elapsed;
 //   #define pwm_thr_upperlimit   11312  //  20% duty cycle - V1 11241
 //
 
+// pins definition
+// Teensy 3.2 pin 6 == PTD4
 #define PIN_STEERING_OUTPUT 6
+// Teensy 3.2 pin 3 == PTA12
+// not used directly (see setupFTM1)
 #define PIN_STEERING_INPUT 3
+// Teensy 3.2 pin 5 == PTD7
 #define PIN_THROTTLE_OUTPUT 5
+// Teensy 3.2 pin 4 == PTA13
+// not used directly (see setupFTM1)
 #define PIN_THROTTLE_INPUT 4
+// Teensy 3.2 onboard orange LED pin 13 == PTC5
+#define PIN_LED 13
 
-#define PIN_13_LED 13
+void handleDriveMessage(int16_t pwm_drive, int16_t pwm_angle) {
 
-void messageDrive(int16_t pwm_drive, int16_t pwm_angle) {
-
-	if (!flagStop && !flagManualOverride) {
-		if ((pwm_thr_center_upper < pwm_drive || pwm_drive < pwm_thr_center_lower) && vescMode) {
-			NVIC_DISABLE_IRQ(IRQ_FTM1);
-			analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
-			NVIC_ENABLE_IRQ(IRQ_FTM1);
-			delay(80);
-			vescMode = false;
-		}
-
-		NVIC_DISABLE_IRQ(IRQ_FTM1);
-		if (!vescMode) {
-			if (pwm_drive < pwm_thr_lowerlimit) {
-				analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_lowerlimit); // Safety lower limit
-			} else if (pwm_drive > pwm_thr_upperlimit) {
-				analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_upperlimit); // Safety upper limit
-			} else {
-				analogWrite(PIN_THROTTLE_OUTPUT, pwm_drive); // Incoming data
-			}
-		}
-
-		if (pwm_angle < pwm_str_lowerlimit) {
-			analogWrite(PIN_STEERING_OUTPUT, pwm_str_lowerlimit); // Safety lower limit
-		} else if (pwm_angle > pwm_str_upperlimit) {
-			analogWrite(PIN_STEERING_OUTPUT, pwm_str_upperlimit); // Safety upper limit
-		} else {
-			analogWrite(PIN_STEERING_OUTPUT, pwm_angle); // Incoming data
-		}
-		NVIC_ENABLE_IRQ(IRQ_FTM1);
-
-		drive_msg_recv_elapsed = 0;
+	if (flagStop || flagManualOverride) {
+		// skip message reception completely
+		// do not update last_drive_msg_reception_elapsed
+		return;
 	}
+
+	// we are in the VESC mode BUT pwm_drive value is out of the center (calm) range
+	// interpret this as a request to disable the VESC mode
+	if (vescMode && (pwm_thr_center_upper < pwm_drive || pwm_drive < pwm_thr_center_lower)) {
+		NVIC_DISABLE_IRQ(IRQ_FTM1);
+		analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
+		NVIC_ENABLE_IRQ(IRQ_FTM1);
+		// klapajar:
+		//   Experimentally it was found out that at least 80ms of "calm state" (but it might be possible
+		//   with other valid values) is required for VESC to properly handle mode switching.
+		delay(80);
+		vescMode = false;
+	}
+
+	NVIC_DISABLE_IRQ(IRQ_FTM1);
+
+	// only control throttle if we are not in the VESC mode
+	if (!vescMode) {
+		// TODO: replace with clap(value, lower_bound_incl, upper_bound_incl)
+		if (pwm_drive < pwm_thr_lowerlimit) {
+			analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_lowerlimit); // Safety lower limit
+		} else if (pwm_drive > pwm_thr_upperlimit) {
+			analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_upperlimit); // Safety upper limit
+		} else {
+			analogWrite(PIN_THROTTLE_OUTPUT, pwm_drive); // Incoming data
+		}
+	}
+
+	// always control steering
+	// TODO: replace with clap(value, lower_bound_incl, upper_bound_incl)
+	if (pwm_angle < pwm_str_lowerlimit) {
+		analogWrite(PIN_STEERING_OUTPUT, pwm_str_lowerlimit); // Safety lower limit
+	} else if (pwm_angle > pwm_str_upperlimit) {
+		analogWrite(PIN_STEERING_OUTPUT, pwm_str_upperlimit); // Safety upper limit
+	} else {
+		analogWrite(PIN_STEERING_OUTPUT, pwm_angle); // Incoming data
+	}
+
+	NVIC_ENABLE_IRQ(IRQ_FTM1);
+
+	// update reception timestamp
+	last_drive_msg_reception_elapsed = 0;
 
 }
 
-void messageEmergencyStop(bool flagValue) {
+void handleEmergencyStopMessage(bool flagValue) {
 
 	flagStop = flagValue;
 
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
 	if (flagStop && !flagManualOverride) {
-		digitalWrite(PIN_13_LED, HIGH); // turn on led
+		digitalWrite(PIN_LED, HIGH); // turn on the LED (signals manual mode, blinking done as part of the ftm1_isr)
 		analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
 		analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
 	}
@@ -131,7 +152,7 @@ void messageEmergencyStop(bool flagValue) {
 	if (!flagStop) {
 		flagManualOverride = false;
 		vescMode = true;
-		digitalWrite(PIN_13_LED, LOW);
+		digitalWrite(PIN_LED, LOW); // turn off the LED (signals autonomous mode)
 	}
 
 }
@@ -146,7 +167,7 @@ void ftm1_isr() {
 	static int LED_state = LOW;
 
 	bool overflowed = false;
-	uint32_t cap_val, status_reg_copy = FTM1_STATUS;
+	uint32_t cap_val, status_reg_copy = FTM1_STATUS; // so that it has constant value during the whole ISR
 	uint32_t pwm_high_c0, pwm_high_c1;
 
 	if (FTM1_SC & FTM_SC_TOF) {
@@ -235,12 +256,11 @@ void ftm1_isr() {
 		} else {
 			LED_state = LOW;
 		}
-
-		digitalWrite(PIN_13_LED, LED_state);
+		digitalWrite(PIN_LED, LED_state);
 		manual_blink_elapsed = 0;
 	}
 
-	ftm_irq_elapsed = 0;
+	last_ftm1_irq_elapsed = 0;
 
 }
 
@@ -263,7 +283,7 @@ void setupFTM1() {
 
 	// Select alternative function 3 for pins 3 and 4 to be FTM1_CH0 and FTM1_CH1 respectively:
 	//   Teensy pin 3 is PTA12 (configured via PORTA_PCR12)
-	//   Teensy pin 3 is PTA13 (configured via PORTA_PCR13)
+	//   Teensy pin 4 is PTA13 (configured via PORTA_PCR13)
 	//   see Chapter 11: Port control and interrupts (PORT)
 	//       and also Chapter 10: Signal Multiplexing and Signal Descriptions
 	CORE_PIN3_CONFIG = PORT_PCR_MUX(3); // alternative function 3 of pin 3 is FTM1_CH0
@@ -273,14 +293,14 @@ void setupFTM1() {
 	// to read input PWM signals of a known frequency (91 Hz, PWM_FREQUENCY)
 	//   see Chapter 36: FlexTimer Module (FTM) in [K20P64M72SF1RM]
 
-	// TODO: document the meaning of the values
+	// TODO: document the meaning of these values
 	FTM1_SC = 0;
 	FTM1_CNT = 0;
 	FTM1_MOD = 0xFFFF;
 	FTM1_SC = FTM_SC_VALUE;
 	FTM1_MODE = FTM_MODE_WPDIS;
 
-	// TODO: document the meaning of the values
+	// TODO: document the meaning of these values
 	FTM1_FILTER = FTM_FILTER_CH0FVAL(2) | FTM_FILTER_CH1FVAL(2);
 	FTM1_C0SC = FTM_CSC_RAISING;
 	FTM1_C1SC = FTM_CSC_RAISING;
@@ -311,8 +331,8 @@ void setup() {
 	analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
 	analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
 
-	pinMode(PIN_13_LED, OUTPUT);
-	digitalWrite(PIN_13_LED, LOW); // turn off the LED
+	pinMode(PIN_LED, OUTPUT);
+	digitalWrite(PIN_LED, LOW); // turn off the LED
 
 	pinMode(2, INPUT); // TODO: What purpose has pin 2? Maybe it is connected to the PCB?
 
@@ -358,9 +378,12 @@ void loop() {
 		// analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
 		analogWrite(PIN_THROTTLE_OUTPUT, 0);
 	} else if (
-		(!flagManualOverride && !flagStop && drive_msg_recv_elapsed > 300)
-		|| (flagManualOverride && ftm_irq_elapsed > 100)
+		// handles drive messages stream lost in the autonomous mode
+		(!flagManualOverride && !flagStop && last_drive_msg_reception_elapsed > 300)
+		// handles RF PWM signal loss in the manual override mode
+		|| (flagManualOverride && last_ftm1_irq_elapsed > 100)
 		) {
+		// set steering to straight and stop the car
 		analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
 		analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
 	}
