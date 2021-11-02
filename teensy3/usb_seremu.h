@@ -1,6 +1,6 @@
 /* Teensyduino Core Library
  * http://www.pjrc.com/teensy/
- * Copyright (c) 2013 PJRC.COM, LLC.
+ * Copyright (c) 2017 PJRC.COM, LLC.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -54,6 +54,7 @@ void usb_seremu_flush_output(void);
 void usb_seremu_flush_callback(void);
 extern volatile uint8_t usb_seremu_transmit_flush_timer;
 extern volatile uint8_t usb_configuration;
+extern volatile uint8_t usb_seremu_online;
 #ifdef __cplusplus
 }
 #endif
@@ -64,7 +65,21 @@ extern volatile uint8_t usb_configuration;
 class usb_seremu_class : public Stream
 {
 public:
-        void begin(long) { /* TODO: call a function that tries to wait for enumeration */ };
+	constexpr usb_seremu_class() {}
+        void begin(long) {
+		uint32_t millis_begin = systick_millis_count;
+		while (!(*this)) {
+			uint32_t elapsed = systick_millis_count - millis_begin;
+			if (usb_configuration) {
+				// Wait up to 2 seconds for Arduino Serial Monitor
+				if (elapsed > 2000) break;
+			} else {
+				// But wait only 3/4 second if there is no sign the
+				// USB host has begun the USB enumeration process.
+				if (elapsed > 750) break;
+			}
+		}
+	}
         void end() { /* TODO: flush output and shut down USB port */ };
         virtual int available() { return usb_seremu_available(); }
         virtual int read() { return usb_seremu_getchar(); }
@@ -76,7 +91,7 @@ public:
         size_t write(long n) { return write((uint8_t)n); }
         size_t write(unsigned int n) { return write((uint8_t)n); }
         size_t write(int n) { return write((uint8_t)n); }
-	int availableForWrite() { return usb_seremu_write_buffer_free(); }
+	virtual int availableForWrite() { return usb_seremu_write_buffer_free(); }
 	using Print::write;
         void send_now(void) { usb_seremu_flush_output(); };
         uint32_t baud(void) { return 9600; }
@@ -85,7 +100,7 @@ public:
         uint8_t numbits(void) { return 8; }
         uint8_t dtr(void) { return 1; }
         uint8_t rts(void) { return 1; }
-        operator bool() { return usb_configuration; }
+        operator bool() { return usb_configuration && usb_seremu_online; }
 };
 extern usb_seremu_class Serial;
 extern void serialEvent(void);
@@ -101,6 +116,7 @@ extern void serialEvent(void);
 class usb_seremu_class : public Stream
 {
 public:
+	constexpr usb_seremu_class() {}
 	void begin(long) { };
 	void end() { };
 	virtual int available() { return 0; }

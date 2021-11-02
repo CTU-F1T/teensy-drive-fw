@@ -1,17 +1,17 @@
 /*
  WCharacter.h - Character utility functions for Wiring & Arduino
  Copyright (c) 2010 Hernando Barragan.  All right reserved.
- 
+
  This library is free software; you can redistribute it and/or
  modify it under the terms of the GNU Lesser General Public
  License as published by the Free Software Foundation; either
  version 2.1 of the License, or (at your option) any later version.
- 
+
  This library is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  Lesser General Public License for more details.
- 
+
  You should have received a copy of the GNU Lesser General Public
  License along with this library; if not, write to the Free Software
  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
@@ -61,7 +61,7 @@ inline boolean isAlpha(int c)
 // that fits into the ASCII character set.
 inline boolean isAscii(int c)
 {
-  return ( isascii (c) == 0 ? false : true);
+  return ((c & ~0x7F) != 0 ? false : true);
 }
 
 
@@ -143,7 +143,7 @@ inline boolean isHexadecimalDigit(int c)
 // ASCII character set, by clearing the high-order bits.
 inline int toAscii(int c)
 {
-  return toascii (c);
+  return (c & 0x7F);
 }
 
 

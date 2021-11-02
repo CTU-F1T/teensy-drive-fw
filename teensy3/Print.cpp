@@ -1,38 +1,45 @@
-/*
- Print.cpp - Base class that provides print() and println()
- Copyright (c) 2008 David A. Mellis.  All right reserved.
- many modifications, by Paul Stoffregen <paul@pjrc.com>
- 
- This library is free software; you can redistribute it and/or
- modify it under the terms of the GNU Lesser General Public
- License as published by the Free Software Foundation; either
- version 2.1 of the License, or (at your option) any later version.
- 
- This library is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- Lesser General Public License for more details.
- 
- You should have received a copy of the GNU Lesser General Public
- License along with this library; if not, write to the Free Software
- Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- 
- Modified 23 November 2006 by David A. Mellis
+/* Teensyduino Core Library
+ * http://www.pjrc.com/teensy/
+ * Copyright (c) 2017 PJRC.COM, LLC.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * 1. The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * 2. If the Software is incorporated into a build system that allows
+ * selection among a list of target devices, then similar target
+ * devices manufactured by PJRC.COM must be included in the list of
+ * target devices and selectable in the same manner.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
-//#include <stdio.h>
-//#include <string.h>
-#include <inttypes.h>
-#include <math.h>
-//#include <avr/pgmspace.h>
-//#include "wiring.h"
+// Long ago this file contained code from Arduino.cc, which was
+// Copyright (c) 2008 David A. Mellis.  No substantial portion of
+// Arduino's original code remains.  In fact, several improvements
+// developed for Teensyduino have made their way back into
+// Arduino's code base.  :-)
 
-#include "Print.h"
-
+#include <Arduino.h>
 
 
 size_t Print::write(const uint8_t *buffer, size_t size)
 {
+	if (buffer == nullptr) return 0;
 	size_t count = 0;
 	while (size--) count += write(*buffer++);
 	return count;
@@ -80,7 +87,7 @@ __attribute__((weak))
 int _write(int file, char *ptr, int len)
 {
 	((class Print *)file)->write((uint8_t *)ptr, len);
-	return 0;
+	return len;
 }
 }
 
@@ -279,6 +286,38 @@ size_t Print::printNumber(unsigned long n, uint8_t base, uint8_t sign)
 }
 
 #endif
+
+size_t Print::print(int64_t n)
+{
+	if (n < 0) return printNumber64(-n, 10, 1);
+	return printNumber64(n, 10, 0);
+}
+
+size_t Print::printNumber64(uint64_t n, uint8_t base, uint8_t sign)
+{
+	uint8_t buf[66];
+	uint8_t digit, i;
+
+	if (base < 2) return 0;
+	if (n == 0) {
+		buf[sizeof(buf) - 1] = '0';
+		i = sizeof(buf) - 1;
+	} else {
+		i = sizeof(buf) - 1;
+		while (1) {
+			digit = n % base;
+			buf[i] = ((digit < 10) ? '0' + digit : 'A' + digit - 10);
+			n /= base;
+			if (n == 0) break;
+			i--;
+		}
+	}
+	if (sign) {
+		i--;
+		buf[i] = '-';
+	}
+	return write(buf + i, sizeof(buf) - i);
+}
 
 size_t Print::printFloat(double number, uint8_t digits) 
 {

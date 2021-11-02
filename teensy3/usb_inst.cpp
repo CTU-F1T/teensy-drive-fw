@@ -1,6 +1,6 @@
 /* Teensyduino Core Library
  * http://www.pjrc.com/teensy/
- * Copyright (c) 2013 PJRC.COM, LLC.
+ * Copyright (c) 2017 PJRC.COM, LLC.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -10,10 +10,10 @@
  * permit persons to whom the Software is furnished to do so, subject to
  * the following conditions:
  *
- * 1. The above copyright notice and this permission notice shall be 
+ * 1. The above copyright notice and this permission notice shall be
  * included in all copies or substantial portions of the Software.
  *
- * 2. If the Software is incorporated into a build system that allows 
+ * 2. If the Software is incorporated into a build system that allows
  * selection among a list of target devices, then similar target
  * devices manufactured by PJRC.COM must be included in the list of
  * target devices and selectable in the same manner.
@@ -28,7 +28,7 @@
  * SOFTWARE.
  */
 
-#include "WProgram.h"
+#include <Arduino.h>
 #include "usb_desc.h"
 
 #if F_CPU >= 20000000
@@ -36,6 +36,18 @@
 #ifdef CDC_DATA_INTERFACE
 #ifdef CDC_STATUS_INTERFACE
 usb_serial_class Serial;
+#endif
+#endif
+
+#ifdef CDC2_DATA_INTERFACE
+#ifdef CDC2_STATUS_INTERFACE
+usb_serial2_class SerialUSB1;
+#endif
+#endif
+
+#ifdef CDC3_DATA_INTERFACE
+#ifdef CDC3_STATUS_INTERFACE
+usb_serial3_class SerialUSB2;
 #endif
 #endif
 
@@ -75,7 +87,8 @@ usb_serial_class Serial;
 
 #else // F_CPU < 20 MHz
 
-#if defined(USB_SERIAL) || defined(USB_SERIAL_HID)
+#if defined(USB_SERIAL) || defined(USB_DUAL_SERIAL) || \
+    defined(USB_TRIPLE_SERIAL) || defined(USB_SERIAL_HID)
 usb_serial_class Serial;
 #elif (USB_DISABLED)
 usb_serial_class Serial;
@@ -84,6 +97,3 @@ usb_seremu_class Serial;
 #endif
 
 #endif // F_CPU
-
-void serialEvent() __attribute__((weak));
-void serialEvent() {}

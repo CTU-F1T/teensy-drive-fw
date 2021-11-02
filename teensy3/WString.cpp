@@ -19,7 +19,7 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
-#include "WString.h"
+#include <Arduino.h>
 
 
 /*********************************************/
@@ -174,16 +174,8 @@ String & String::copy(const char *cstr, unsigned int length)
 
 void String::move(String &rhs)
 {
-	if (buffer) {
-		if (capacity >= rhs.len) {
-			strcpy(buffer, rhs.buffer);
-			len = rhs.len;
-			rhs.len = 0;
-			return;
-		} else {
-			free(buffer);
-		}
-	}
+	if (&rhs == this) return;
+	if (buffer) free(buffer);
 	buffer = rhs.buffer;
 	capacity = rhs.capacity;
 	len = rhs.len;
@@ -484,6 +476,8 @@ unsigned char String::endsWith( const String &s2 ) const
 /*  Character Access                         */
 /*********************************************/
 
+const char String::zerotermination = 0;
+
 char String::charAt(unsigned int loc) const
 {
 	return operator[](loc);
@@ -560,7 +554,7 @@ int String::lastIndexOf( char theChar ) const
 
 int String::lastIndexOf(char ch, unsigned int fromIndex) const
 {
-	if (fromIndex >= len || fromIndex < 0) return -1;
+	if (fromIndex >= len) return -1;
 	char tempchar = buffer[fromIndex + 1];
 	buffer[fromIndex + 1] = '\0';
 	char* temp = strrchr( buffer, ch );
@@ -576,7 +570,7 @@ int String::lastIndexOf(const String &s2) const
 
 int String::lastIndexOf(const String &s2, unsigned int fromIndex) const
 {
-  	if (s2.len == 0 || len == 0 || s2.len > len || fromIndex < 0) return -1;
+  	if (s2.len == 0 || len == 0 || s2.len > len) return -1;
 	if (fromIndex >= len) fromIndex = len - 1;
 	int found = -1;
 	for (char *p = buffer; p <= buffer + fromIndex; p++) {
