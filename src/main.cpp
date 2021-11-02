@@ -170,6 +170,7 @@ void ftm1_isr() {
 		} else {
 			pwm_high_c0 = cap_val - prev_cap_c0;
 			// duty_cycle_c0 = (PWM_FREQUENCY * pwm_high_c0 * 65535) / F_BUS;
+			// the expr above replaced with the expr below to fix uint32_t overflow
 			duty_cycle_channel_0 = (pwm_high_c0 * 12424) / 100000;
 
 			// Steering
@@ -207,6 +208,7 @@ void ftm1_isr() {
 		} else {
 			pwm_high_c1 = cap_val - prev_cap_c1;
 			// duty_cycle_c1 = (PWM_FREQUENCY * pwm_high_c1 * 65535) / F_BUS;
+			// the expr above replaced with the expr below to fix uint32_t overflow
 			duty_cycle_c1 = (pwm_high_c1 * 12424) / 100000;
 
 			// Throttle
