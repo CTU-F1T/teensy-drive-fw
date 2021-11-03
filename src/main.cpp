@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "version.h"
 #include "config.h"
+#include "protocol.h"
 
 // Input capture FTM register values
 #define FTM_SC_VALUE (FTM_SC_TOIE | FTM_SC_CLKS(1) | FTM_SC_PS(0))
@@ -85,7 +86,12 @@ elapsedMillis last_ftm1_irq_elapsed;
 // Teensy 3.2 onboard orange LED pin 13 == PTC5
 #define PIN_LED 13
 
-void handleDriveMessage(int16_t pwm_drive, int16_t pwm_angle) {
+void handleDrivePwmMessage(message_data_drive_values *msg) {
+
+	Serial.printf("handleDrivePwmMessage: %d %d\n", msg->pwm_drive, msg->pwm_angle);
+
+	int16_t pwm_drive = msg->pwm_drive;
+	int16_t pwm_angle = msg->pwm_angle;
 
 	if (flagStop || flagManualOverride) {
 		// skip message reception completely
@@ -137,9 +143,11 @@ void handleDriveMessage(int16_t pwm_drive, int16_t pwm_angle) {
 
 }
 
-void handleEmergencyStopMessage(bool flagValue) {
+void handleEmergencyStopMessage(message_data_bool *msg) {
 
-	flagStop = flagValue;
+	Serial.printf("handleEmergencyStopMessage: %d\n", msg->data);
+
+	flagStop = msg->data;
 
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
 	if (flagStop && !flagManualOverride) {
@@ -370,7 +378,8 @@ void loop() {
 		channel_1_done = 0;
 	}
 
-	// TODO: nh.spinOnce(); (replace with USB Serial receive data check)
+	// TODO: this is replacement of nh.spinOnce();
+	try_receive_message();
 
 	// drive command timeout
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
@@ -394,6 +403,9 @@ void loop() {
 int main() {
 
 	setup();
+
+	set_message_handler(MESSAGE_TYPE_ESTOP, reinterpret_cast<message_handler>(handleEmergencyStopMessage));
+	set_message_handler(MESSAGE_TYPE_DRIVE_PWM, reinterpret_cast<message_handler>(handleDrivePwmMessage));
 
 	while (true) {
 		loop();
