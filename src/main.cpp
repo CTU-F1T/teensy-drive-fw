@@ -23,6 +23,14 @@ elapsedMillis manual_blink_elapsed;
 elapsedMillis last_drive_msg_reception_elapsed;
 elapsedMillis last_ftm1_irq_elapsed;
 
+// messages to send
+struct packet_message_bool msg_estop = {
+	.type = MESSAGE_ESTOP,
+};
+struct packet_message_pwm_high msg_pwm_high = {
+	.type = MESSAGE_PWM_HIGH,
+};
+
 // Measured values (v2):
 //   TRIM STEERING - CALM STATE
 //       left: 8247, right: 9622
@@ -87,12 +95,15 @@ elapsedMillis last_ftm1_irq_elapsed;
 // Teensy 3.2 onboard orange LED pin 13 == PTC5
 #define PIN_LED 13
 
-void handleDrivePwmMessage(message_data_drive_values *msg) {
+void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 
-	debug(Serial1.printf("handleDrivePwmMessage: %d %d\n", msg->pwm_drive, msg->pwm_angle));
+	debug(Serial1.printf(
+		"handleDrivePwmPacket: pwm_drive=%d pwm_angle=%d\n",
+		packet->payload.pwm_drive, packet->payload.pwm_angle
+	));
 
-	int16_t pwm_drive = msg->pwm_drive;
-	int16_t pwm_angle = msg->pwm_angle;
+	int16_t pwm_drive = packet->payload.pwm_drive;
+	int16_t pwm_angle = packet->payload.pwm_angle;
 
 	if (flagStop || flagManualOverride) {
 		// skip message reception completely
@@ -144,11 +155,11 @@ void handleDrivePwmMessage(message_data_drive_values *msg) {
 
 }
 
-void handleEmergencyStopMessage(message_data_bool *msg) {
+void handleEmergencyStopPacket(struct packet_message_bool *packet) {
 
-	debug(Serial1.printf("handleEmergencyStopMessage: %d\n", msg->data));
+	debug(Serial1.printf("handleEmergencyStopPacket: %d\n", packet->payload.data));
 
-	flagStop = msg->data;
+	flagStop = packet->payload.data;
 
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
 	if (flagStop && !flagManualOverride) {
@@ -208,9 +219,9 @@ void ftm1_isr() {
 				(
 					duty_cycle_channel_0 > pwm_str_center_upper || duty_cycle_channel_0 < pwm_str_center_lower
 				)) { // V1 - > 9000; < 8300
-				// TODO: publish via USB Serial
-				// estop_msg.data = true;
-				// estop_pub.publish(&estop_msg);
+				// TODO: this is replacement
+				msg_estop.payload.data = true;
+				send_packet(reinterpret_cast<const union packet *>(&msg_estop));
 
 				flagManualOverride = true;
 			}
@@ -246,9 +257,9 @@ void ftm1_isr() {
 				(
 					duty_cycle_channel_1 > pwm_thr_center_upper || duty_cycle_channel_1 < pwm_thr_center_lower
 				)) {
-				// TODO: publish via USB Serial
-				// estop_msg.data = true;
-				// estop_pub.publish(&estop_msg);
+				// TODO: this is replacement
+				msg_estop.payload.data = true;
+				send_packet(reinterpret_cast<const union packet *>(&msg_estop));
 
 				flagManualOverride = true;
 			}
@@ -426,20 +437,72 @@ void usb_debug_loop() {
 
 };
 
+#define IS_BIG_ENDIAN (*(uint16_t *)"\0\xff" < 0x100)
+
+
+void print_bytes(const unsigned char *ptr, int size) {
+
+	Serial1.printf("  bytes in %s: ", IS_BIG_ENDIAN ? "MSB" : "LSB");
+	for (int i = 0; i < size; i++) {
+		Serial1.printf(" 0x%02x", *(ptr + i));
+	}
+	Serial1.printf("\n");
+
+}
+
+void fake_messages_loop() {
+
+	static elapsedMillis fake_estop_elapsed;
+	static elapsedMillis fake_last_pwm_high_elapsed;
+	static uint16_t value = 0;
+
+	// if (fake_estop_elapsed > 2000) {
+	// 	msg_estop->data = true;
+	// 	// debug(elapsedMicros t1);
+	// 	print_bytes(reinterpret_cast<const unsigned char *>(&raw_msg_estop), sizeof(struct message));
+	// 	send_message(&raw_msg_estop);
+	// 	// debug(Serial1.printf("send estop took %d us\n", (int) t1));
+	// 	fake_estop_elapsed = 0;
+	// }
+
+	if (fake_last_pwm_high_elapsed > 2000) {
+
+		debug(Serial1.printf("value=%hu \n", value));
+		msg_pwm_high.payload.period_thr = value;
+		msg_pwm_high.payload.period_str = UINT16_MAX - value;
+		print_bytes(reinterpret_cast<const unsigned char *>(&msg_pwm_high), sizeof(msg_pwm_high));
+		// debug(elapsedMicros t2);
+		send_packet(reinterpret_cast<const union packet *>(&msg_pwm_high));
+		// debug(Serial1.printf("send pwm high took %d us\n", (int) t2));
+		value++;
+
+		msg_estop.payload.data = true;
+		print_bytes(reinterpret_cast<const unsigned char *>(&msg_estop), sizeof(msg_estop));
+		send_packet(reinterpret_cast<const union packet *>(&msg_estop));
+
+		fake_last_pwm_high_elapsed = 0;
+
+	}
+
+}
+
 void loop() {
 
-	if (channel_0_done && channel_1_done) {
-		// TODO: publish via USB Serial
-		// pwm_high_msg.period_thr = duty_cycle_c1;
-		// pwm_high_msg.period_str = duty_cycle_c0;
-		// pwm_high.publish(&pwm_high_msg);
+	static elapsedMillis last_pwm_high_elapsed;
 
+	if (channel_0_done && channel_1_done) {
+		// TODO: this is replacement
+		msg_pwm_high.payload.period_thr = duty_cycle_channel_1;
+		msg_pwm_high.payload.period_str = duty_cycle_channel_0;
+		send_packet(reinterpret_cast<const union packet *>(&msg_pwm_high));
 		channel_0_done = 0;
 		channel_1_done = 0;
+		debug(Serial1.printf("pwm_high after %d ms\n", (int) last_pwm_high_elapsed));
+		last_pwm_high_elapsed = 0;
 	}
 
 	// TODO: this is replacement of nh.spinOnce();
-	try_receive_message();
+	try_receive_packet();
 
 	// drive command timeout
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
@@ -464,10 +527,11 @@ int main() {
 
 	setup();
 
-	set_message_handler(MESSAGE_TYPE_ESTOP, reinterpret_cast<message_handler>(handleEmergencyStopMessage));
-	set_message_handler(MESSAGE_TYPE_DRIVE_PWM, reinterpret_cast<message_handler>(handleDrivePwmMessage));
+	set_packet_handler(MESSAGE_ESTOP, reinterpret_cast<packet_handler>(handleEmergencyStopPacket));
+	set_packet_handler(MESSAGE_DRIVE_PWM, reinterpret_cast<packet_handler>(handleDrivePwmPacket));
 
 	while (true) {
+		fake_messages_loop();
 		loop();
 		// yield(); // no need to call it as we are not interested in the events it produces
 	}

@@ -9,57 +9,107 @@
 extern "C" {
 #endif
 
-struct message_data_bool {
+// packet
+//   min size = 2 + 1 + 2 = 5 bytes
+//   max size = 2 + 4 + 2 = 8 bytes
+//
+//   structure
+//     uint16_t type
+//     uint8_t payload[1 - 4]
+//     uint16_t checksum
+//
+
+struct message_bool {
 	bool data;
 };
 
-struct message_data_drive_values {
+struct packet_message_bool {
+	uint16_t type;
+	struct message_bool payload;
+	uint16_t checksum;
+} __attribute__((__packed__));
+
+struct message_drive_values {
 	int16_t pwm_drive;
 	int16_t pwm_angle;
 };
 
-struct message_data_pwm_high {
+struct packet_message_drive_values {
+	uint16_t type;
+	struct message_drive_values payload;
+	uint16_t checksum;
+} __attribute__((__packed__));
+
+struct message_pwm_high {
 	uint16_t period_thr;
 	uint16_t period_str;
 };
 
-enum message_type {
-	MESSAGE_TYPE_ESTOP = 1,
-	MESSAGE_TYPE_DRIVE_PWM = 2,
-	MESSAGE_TYPE_PWM_HIGH = 3,
+struct packet_message_pwm_high {
+	uint16_t type;
+	struct message_pwm_high payload;
+	uint16_t checksum;
+} __attribute__((__packed__));
+
+union packet {
+	struct packet_message_bool estop;
+	struct packet_message_drive_values drive_pwm;
+	struct packet_message_pwm_high pwm_high;
 };
 
-const static int message_data_size[] = {
+enum packet_type {
+	MESSAGE_ESTOP = 1,
+	MESSAGE_DRIVE_PWM = 2,
+	MESSAGE_PWM_HIGH = 3,
+};
+
+const static int packet_type_to_payload_size_table[] = {
 	[0] = -1,
-	[MESSAGE_TYPE_ESTOP] = sizeof(struct message_data_bool),
-	[MESSAGE_TYPE_DRIVE_PWM] = sizeof(struct message_data_drive_values),
-	[MESSAGE_TYPE_PWM_HIGH] = sizeof(struct message_data_pwm_high),
+	[MESSAGE_ESTOP] = sizeof(struct message_bool),
+	[MESSAGE_DRIVE_PWM] = sizeof(struct message_drive_values),
+	[MESSAGE_PWM_HIGH] = sizeof(struct message_pwm_high),
 };
 
-struct message {
-	uint8_t type;
-	union message_data {
-		struct message_data_bool estop;
-		struct message_data_drive_values drive_pwm;
-		struct message_data_pwm_high pwm_high;
-	} data;
-};
-
-#define message_max_size sizeof(struct message)
+#define packet_max_size sizeof(union packet)
 
 #ifdef static_assert
-static_assert(sizeof(struct message_data_bool) == 1, "sizeof struct message_data_bool is not 1 byte");
-static_assert(sizeof(struct message_data_drive_values) == 4, "sizeof struct message_data_drive_values is not 4 bytes");
-static_assert(sizeof(struct message_data_pwm_high) == 4, "sizeof struct message_data_pwm_high is not 4 bytes");
-static_assert(sizeof(union message_data) == 4, "sizeof union message_data struct is not 4 bytes");
-static_assert(sizeof(struct message) == 6, "sizeof struct message is not 6 bytes");
+static_assert(
+	sizeof(struct message_bool) == 1,
+	"sizeof struct message_bool is not 1 byte"
+);
+static_assert(
+	sizeof(struct packet_message_bool) == 5,
+	"sizeof struct packet_message_bool is not 1 byte"
+);
+static_assert(
+	sizeof(struct message_drive_values) == 4,
+	"sizeof struct message_drive_values is not 4 bytes"
+);
+static_assert(
+	sizeof(struct packet_message_drive_values) == 8,
+	"sizeof struct packet_message_drive_values is not 8 bytes"
+);
+static_assert(
+	sizeof(struct message_pwm_high) == 4,
+	"sizeof struct message_pwm_high is not 4 bytes"
+);
+static_assert(
+	sizeof(struct packet_message_pwm_high) == 8,
+	"sizeof struct packet_message_pwm_high is not 8 bytes"
+);
+static_assert(
+	sizeof(union packet) == 8,
+	"sizeof union packet struct is not 8 bytes"
+);
 #endif // static_assert
 
-void try_receive_message();
+void try_receive_packet();
 
-typedef void (*message_handler)(void *);
+typedef void (*packet_handler)(const union packet *packet);
 
-void set_message_handler(enum message_type type, message_handler handler);
+void set_packet_handler(enum packet_type type, packet_handler handler);
+
+bool send_packet(const union packet *packet);
 
 #ifdef __cplusplus
 }
