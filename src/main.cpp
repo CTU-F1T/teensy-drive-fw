@@ -221,7 +221,7 @@ void ftm1_isr() {
 				)) { // V1 - > 9000; < 8300
 				// TODO: this is replacement
 				msg_estop.payload.data = true;
-				send_packet(reinterpret_cast<const union packet *>(&msg_estop));
+				send_packet(reinterpret_cast<union packet *>(&msg_estop));
 
 				flagManualOverride = true;
 			}
@@ -259,7 +259,7 @@ void ftm1_isr() {
 				)) {
 				// TODO: this is replacement
 				msg_estop.payload.data = true;
-				send_packet(reinterpret_cast<const union packet *>(&msg_estop));
+				send_packet(reinterpret_cast<union packet *>(&msg_estop));
 
 				flagManualOverride = true;
 			}
@@ -439,7 +439,6 @@ void usb_debug_loop() {
 
 #define IS_BIG_ENDIAN (*(uint16_t *)"\0\xff" < 0x100)
 
-
 void print_bytes(const unsigned char *ptr, int size) {
 
 	Serial1.printf("  bytes in %s: ", IS_BIG_ENDIAN ? "MSB" : "LSB");
@@ -459,8 +458,8 @@ void fake_messages_loop() {
 	// if (fake_estop_elapsed > 2000) {
 	// 	msg_estop->data = true;
 	// 	// debug(elapsedMicros t1);
-	// 	print_bytes(reinterpret_cast<const unsigned char *>(&raw_msg_estop), sizeof(struct message));
 	// 	send_message(&raw_msg_estop);
+	// 	print_bytes(reinterpret_cast<const unsigned char *>(&raw_msg_estop), sizeof(struct message));
 	// 	// debug(Serial1.printf("send estop took %d us\n", (int) t1));
 	// 	fake_estop_elapsed = 0;
 	// }
@@ -470,15 +469,15 @@ void fake_messages_loop() {
 		debug(Serial1.printf("value=%hu \n", value));
 		msg_pwm_high.payload.period_thr = value;
 		msg_pwm_high.payload.period_str = UINT16_MAX - value;
-		print_bytes(reinterpret_cast<const unsigned char *>(&msg_pwm_high), sizeof(msg_pwm_high));
 		// debug(elapsedMicros t2);
-		send_packet(reinterpret_cast<const union packet *>(&msg_pwm_high));
+		send_packet(reinterpret_cast<union packet *>(&msg_pwm_high));
 		// debug(Serial1.printf("send pwm high took %d us\n", (int) t2));
+		print_bytes(reinterpret_cast<const unsigned char *>(&msg_pwm_high), sizeof(msg_pwm_high));
 		value++;
 
 		msg_estop.payload.data = true;
+		send_packet(reinterpret_cast<union packet *>(&msg_estop));
 		print_bytes(reinterpret_cast<const unsigned char *>(&msg_estop), sizeof(msg_estop));
-		send_packet(reinterpret_cast<const union packet *>(&msg_estop));
 
 		fake_last_pwm_high_elapsed = 0;
 
@@ -494,7 +493,7 @@ void loop() {
 		// TODO: this is replacement
 		msg_pwm_high.payload.period_thr = duty_cycle_channel_1;
 		msg_pwm_high.payload.period_str = duty_cycle_channel_0;
-		send_packet(reinterpret_cast<const union packet *>(&msg_pwm_high));
+		send_packet(reinterpret_cast<union packet *>(&msg_pwm_high));
 		channel_0_done = 0;
 		channel_1_done = 0;
 		debug(Serial1.printf("pwm_high after %d ms\n", (int) last_pwm_high_elapsed));

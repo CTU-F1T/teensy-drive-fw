@@ -16,7 +16,7 @@ extern "C" {
 //   structure
 //     uint16_t type
 //     uint8_t payload[1 - 4]
-//     uint16_t checksum
+//     uint16_t checksum // big endian (MSB first)
 //
 
 struct message_bool {
@@ -26,7 +26,7 @@ struct message_bool {
 struct packet_message_bool {
 	uint16_t type;
 	struct message_bool payload;
-	uint16_t checksum;
+	uint16_t checksum; // big endian (MSB first)
 } __attribute__((__packed__));
 
 struct message_drive_values {
@@ -37,7 +37,7 @@ struct message_drive_values {
 struct packet_message_drive_values {
 	uint16_t type;
 	struct message_drive_values payload;
-	uint16_t checksum;
+	uint16_t checksum; // big endian (MSB first)
 } __attribute__((__packed__));
 
 struct message_pwm_high {
@@ -48,7 +48,7 @@ struct message_pwm_high {
 struct packet_message_pwm_high {
 	uint16_t type;
 	struct message_pwm_high payload;
-	uint16_t checksum;
+	uint16_t checksum; // big endian (MSB first)
 } __attribute__((__packed__));
 
 union packet {
@@ -109,7 +109,7 @@ typedef void (*packet_handler)(const union packet *packet);
 
 void set_packet_handler(enum packet_type type, packet_handler handler);
 
-bool send_packet(const union packet *packet);
+bool send_packet(union packet *packet);
 
 #ifdef __cplusplus
 }

@@ -107,7 +107,16 @@ void set_packet_handler(enum packet_type type, packet_handler handler) {
 	packet_handlers[type] = handler;
 }
 
-bool send_packet(const union packet *packet) {
+/**
+ * Sends the given packet over USB Serial
+ *
+ * The packet type must be correctly set.
+ * NOTE: This function mutates the packet. It updates the checksum field in the packet.
+ *
+ * @param packet the packet to send, its checksum is recalculated before sending
+ * @return true if the packet was sent successfully, false otherwise
+ */
+bool send_packet(union packet *packet) {
 
 	uint16_t type = *((uint16_t *) packet); // first two bytes are packet type
 	uint32_t payload_size = packet_type_to_payload_size(type);
@@ -117,9 +126,15 @@ bool send_packet(const union packet *packet) {
 	}
 
 	// two bytes checksum field is at the end of packet
-	uint16_t *checksum = (uint16_t *) (((uint8_t *) packet) + 2 + payload_size);
+	uint8_t *checksum_byte = ((uint8_t *) packet) + 2 + payload_size;
 
-	*checksum = crc16((uint8_t *) packet, payload_size + 2);
+	// calculate CRC over the type and the payload
+	uint16_t checksum = crc16((uint8_t *) packet, payload_size + 2);
+
+	// write checksum in big endian order (MSB at the lower address)
+	// so that we can validate it by calculating CRC over the whole packet and checking for 0
+	*checksum_byte++ = checksum >> 8; // packet[size - 2]
+	*checksum_byte = checksum & 0xFF; // packet[size - 1]
 
 	// send the whole packet (including two byte type and two bytes checksum)
 	int result = usb_serial_write(packet, payload_size + 4);
