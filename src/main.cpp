@@ -2,6 +2,7 @@
 #include "version.h"
 #include "config.h"
 #include "protocol.h"
+#include "debug.h"
 
 // Input capture FTM register values
 #define FTM_SC_VALUE (FTM_SC_TOIE | FTM_SC_CLKS(1) | FTM_SC_PS(0))
@@ -88,7 +89,7 @@ elapsedMillis last_ftm1_irq_elapsed;
 
 void handleDrivePwmMessage(message_data_drive_values *msg) {
 
-	Serial.printf("handleDrivePwmMessage: %d %d\n", msg->pwm_drive, msg->pwm_angle);
+	debug(Serial1.printf("handleDrivePwmMessage: %d %d\n", msg->pwm_drive, msg->pwm_angle));
 
 	int16_t pwm_drive = msg->pwm_drive;
 	int16_t pwm_angle = msg->pwm_angle;
@@ -145,7 +146,7 @@ void handleDrivePwmMessage(message_data_drive_values *msg) {
 
 void handleEmergencyStopMessage(message_data_bool *msg) {
 
-	Serial.printf("handleEmergencyStopMessage: %d\n", msg->data);
+	debug(Serial1.printf("handleEmergencyStopMessage: %d\n", msg->data));
 
 	flagStop = msg->data;
 
@@ -332,6 +333,14 @@ void setupFTM1() {
 
 void setup() {
 
+	if (DEBUG) {
+		// send debug messages over hardware UART
+		// see https://www.pjrc.com/teensy/td_uart.html
+		Serial1.setRX(0); // for Teensy 3.2 supported values are 0 or 21
+		Serial1.setTX(1); // for Teensy 3.2 supported values are 1 or 5
+		Serial1.begin(19200, SERIAL_8N1);
+	}
+
 	// this is config of PWM signal output pins
 	analogWriteFrequency(PIN_STEERING_OUTPUT, PWM_FREQUENCY);
 	analogWriteFrequency(PIN_THROTTLE_OUTPUT, PWM_FREQUENCY);
@@ -365,6 +374,55 @@ void setup() {
 	// nh.logwarn((String("Starting Teensy -- FW build ") + VERSION).c_str());
 
 }
+
+void usb_debug_loop() {
+
+#define TEXT_64B "%04d part %02d 000000000000000000000000000000000000000000000000000"
+
+	static int count = 0;
+	static elapsedMillis debug_elapsed;
+
+	if (debug_elapsed > 5000) {
+
+		debug_elapsed = 0;
+
+		count++;
+
+		Serial1.printf(
+			"\n%04d usb=%d baud=%d, dtr=%d, rts=%d\n",
+			count, usb_configuration, Serial.baud(), Serial.dtr(), Serial.rts()
+		);
+
+		// if (count < 10) {
+
+		char buffer[65];
+		int r[15];
+		elapsedMicros t;
+
+		for (int i = 0; i < 15; ++i) {
+			snprintf(buffer, 65, TEXT_64B, count, i + 1);
+			r[i] = usb_serial_write(buffer, 64);
+			// usb_serial_flush_output();
+			// r[i] = Serial.print(buffer);
+			// r[i] = Serial.printf(TEXT_64B, count, i + 1);
+		}
+
+		Serial1.printf(
+			"time=%d\n"
+			// "%d\n\n",
+			"%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n",
+			(int) t,
+			// r[0]
+			r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12], r[13], r[14]
+		);
+
+		t = 0;
+
+		// }
+
+	}
+
+};
 
 void loop() {
 
