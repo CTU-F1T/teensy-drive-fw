@@ -11,7 +11,7 @@
 
 // Input capture helper variables
 static volatile uint32_t duty_cycle_channel_0 = 0;
-static volatile uint32_t duty_cycle_c1 = 0;
+static volatile uint32_t duty_cycle_channel_1 = 0;
 static volatile uint32_t channel_0_done = 0;
 static volatile uint32_t channel_1_done = 0;
 
@@ -239,11 +239,13 @@ void ftm1_isr() {
 			pwm_high_c1 = cap_val - prev_cap_c1;
 			// duty_cycle_c1 = (PWM_FREQUENCY * pwm_high_c1 * 65535) / F_BUS;
 			// the expr above replaced with the expr below to fix uint32_t overflow
-			duty_cycle_c1 = (pwm_high_c1 * 12424) / 100000;
+			duty_cycle_channel_1 = (pwm_high_c1 * 12424) / 100000;
 
 			// Throttle
 			if (!flagManualOverride &&
-				(duty_cycle_c1 > pwm_thr_center_upper || duty_cycle_c1 < pwm_thr_center_lower)) { // V1 - > 9100; < 8800
+				(
+					duty_cycle_channel_1 > pwm_thr_center_upper || duty_cycle_channel_1 < pwm_thr_center_lower
+				)) {
 				// TODO: publish via USB Serial
 				// estop_msg.data = true;
 				// estop_pub.publish(&estop_msg);
@@ -252,7 +254,7 @@ void ftm1_isr() {
 			}
 
 			if (flagManualOverride) {
-				analogWrite(PIN_THROTTLE_OUTPUT, (int) duty_cycle_c1);
+				analogWrite(PIN_THROTTLE_OUTPUT, (int) duty_cycle_channel_1);
 			}
 
 			channel_1_done = 1;
