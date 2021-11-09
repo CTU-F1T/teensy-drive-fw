@@ -119,7 +119,7 @@ void set_packet_handler(enum packet_type type, packet_handler handler) {
 bool send_packet(union packet *packet) {
 
 	uint16_t type = *((uint16_t *) packet); // first two bytes are packet type
-	uint32_t payload_size = packet_type_to_payload_size(type);
+	int payload_size = packet_type_to_payload_size(type);
 
 	if (payload_size == -1) {
 		return -1;
