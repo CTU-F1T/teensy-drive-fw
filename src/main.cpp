@@ -98,7 +98,7 @@ struct packet_message_pwm_high msg_pwm_high = {
 void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 
 	debug(Serial1.printf(
-		"handleDrivePwmPacket: pwm_drive=%d pwm_angle=%d\n",
+		"hDPP: drive=%d angle=%d\n",
 		packet->payload.pwm_drive, packet->payload.pwm_angle
 	));
 
@@ -487,7 +487,7 @@ void fake_messages_loop() {
 
 void loop() {
 
-	static elapsedMillis last_pwm_high_elapsed;
+	// static elapsedMillis last_pwm_high_elapsed;
 
 	if (channel_0_done && channel_1_done) {
 		// TODO: this is replacement
@@ -496,8 +496,8 @@ void loop() {
 		send_packet(reinterpret_cast<union packet *>(&msg_pwm_high));
 		channel_0_done = 0;
 		channel_1_done = 0;
-		debug(Serial1.printf("pwm_high after %d ms\n", (int) last_pwm_high_elapsed));
-		last_pwm_high_elapsed = 0;
+		// debug(Serial1.printf("pwm_high after %d ms\n", (int) last_pwm_high_elapsed));
+		// last_pwm_high_elapsed = 0;
 	}
 
 	// TODO: this is replacement of nh.spinOnce();
@@ -530,7 +530,7 @@ int main() {
 	set_packet_handler(MESSAGE_DRIVE_PWM, reinterpret_cast<packet_handler>(handleDrivePwmPacket));
 
 	while (true) {
-		fake_messages_loop();
+		// fake_messages_loop();
 		loop();
 		// yield(); // no need to call it as we are not interested in the events it produces
 	}
