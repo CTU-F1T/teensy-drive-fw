@@ -26,9 +26,11 @@ elapsedMillis last_ftm1_irq_elapsed;
 // messages to send
 struct packet_message_bool msg_estop = {
 	.type = MESSAGE_ESTOP,
+	.size = sizeof(packet_message_bool),
 };
 struct packet_message_pwm_high msg_pwm_high = {
 	.type = MESSAGE_PWM_HIGH,
+	.size = sizeof(packet_message_pwm_high),
 };
 
 // Measured values (v2):
@@ -309,7 +311,7 @@ void setupFTM1() {
 	//   see Chapter 11: Port control and interrupts (PORT)
 	//       and also Chapter 10: Signal Multiplexing and Signal Descriptions
 	CORE_PIN3_CONFIG = PORT_PCR_MUX(3); // alternative function 3 of pin 3 is FTM1_CH0
-	CORE_PIN4_CONFIG = PORT_PCR_MUX(3); // alternative function 4 of pin 3 is FTM1_CH1
+	CORE_PIN4_CONFIG = PORT_PCR_MUX(3); // alternative function 3 of pin 4 is FTM1_CH1
 
 	// Configure FlexTimer Module 1 so that it can be used
 	// to read input PWM signals of a known frequency (91 Hz, PWM_FREQUENCY)

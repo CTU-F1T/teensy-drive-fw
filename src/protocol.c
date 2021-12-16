@@ -9,7 +9,7 @@ static packet_handler packet_handlers[] = {
 	[MESSAGE_PWM_HIGH] = NULL,
 };
 
-static int packet_type_to_payload_size(uint16_t type) {
+static int packet_type_to_payload_size(uint8_t type) {
 
 	if (type >= sizeof(packet_type_to_payload_size_table)) {
 		return -1;
@@ -30,11 +30,12 @@ void try_receive_packet() {
 
 	static const int payload_max_size = packet_max_size - 4;
 	static union packet packet;
-	static uint16_t *packet_type = ((uint16_t *) &packet);
 	static uint8_t *buffer = (uint8_t *) &packet;
+	static uint8_t *packet_type = ((uint8_t *) &packet);
+	static uint8_t *packet_size_field = ((uint8_t *) &packet) + 1;
 	static int buffer_size = 0;
+	static int expected_packet_size = 0;
 	static int payload_size = 0;
-	static int packet_size = 0;
 
 	// to prevent this while loop to run indefinitely when new data are coming faster
 	// than we are reading, let's limit the maximum number of read bytes
@@ -54,10 +55,20 @@ void try_receive_packet() {
 		// save byte to buffer and then increase buffer index
 		buffer[buffer_size++] = byte;
 
+		// once we have packet size field we confirm it against the expected size
+		if (buffer_size == 2 && *packet_size_field != expected_packet_size) {
+			// shift buffer by one byte
+			//   this effectively means that we drop only the packet type value
+			//   and consider the size value as packet type
+			buffer[0] = buffer[1];
+			buffer_size = 1;
+			// no continue here so the if (buffer_size == 1) can be evaluated (it will be true)
+		}
+
 		// once we have packet type we validate it and use it to determine the packet payload size
-		if (buffer_size == 2) {
-			payload_size = packet_type_to_payload_size(*((uint16_t *) &packet));
-			packet_size = 2 + payload_size + 2;
+		if (buffer_size == 1) {
+			payload_size = packet_type_to_payload_size(*packet_type);
+			expected_packet_size = 2 + payload_size + 2;
 			if (payload_size < 1 || payload_size > payload_max_size) {
 				// reset buffer index on invalid packet type (drops packet type)
 				buffer_size = 0;
@@ -66,7 +77,7 @@ void try_receive_packet() {
 		}
 
 		// packet is complete
-		if (buffer_size == packet_size) {
+		if (buffer_size == expected_packet_size) {
 
 			// validate checksum
 			uint16_t checksum = crc16(buffer, buffer_size);
@@ -118,7 +129,7 @@ void set_packet_handler(enum packet_type type, packet_handler handler) {
  */
 bool send_packet(union packet *packet) {
 
-	uint16_t type = *((uint16_t *) packet); // first two bytes are packet type
+	uint8_t type = *((uint8_t *) packet); // first byte is the packet type
 	int payload_size = packet_type_to_payload_size(type);
 
 	if (payload_size == -1) {
