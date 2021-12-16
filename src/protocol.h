@@ -67,7 +67,7 @@ enum packet_type {
 	MESSAGE_PWM_HIGH = 3,
 };
 
-const static int packet_type_to_payload_size_table[] = {
+static const int packet_type_to_payload_size_table[] = {
 	[0] = -1,
 	[MESSAGE_ESTOP] = sizeof(struct message_bool),
 	[MESSAGE_DRIVE_PWM] = sizeof(struct message_drive_values),
