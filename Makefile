@@ -193,22 +193,22 @@ check-config:
 // Fill in parameters of a target car. You can find them on the platform\n\
 // and/or in redmine.\n\
 // Steering\n\
-#define pwm_str_center_value        // Straight\n\
-#define pwm_str_lowerlimit          // Lowest possible number\n\
-#define pwm_str_upperlimit          // Largest possible number\n\
+#define pwm_str_center_value        0// Straight\n\
+#define pwm_str_lowerlimit          0// Lowest possible number\n\
+#define pwm_str_upperlimit          0// Largest possible number\n\
 \n\
 // Values for switching auto<->manual modes\n\
-#define pwm_str_center_lower        // set this to pwm_str_center_value - 300\n\
-#define pwm_str_center_upper        // set this to pwm_str_center_value + 300\n\
+#define pwm_str_center_lower        0// set this to pwm_str_center_value - 300\n\
+#define pwm_str_center_upper        0// set this to pwm_str_center_value + 300\n\
 \n\
 // Throttle\n\
-#define pwm_thr_center_value        // Calm state\n\
-#define pwm_thr_lowerlimit          // Lowest possible number\n\
-#define pwm_thr_upperlimit          // Largest possible number\n\
+#define pwm_thr_center_value        0// Calm state\n\
+#define pwm_thr_lowerlimit          0// Lowest possible number\n\
+#define pwm_thr_upperlimit          0// Largest possible number\n\
 \n\
 // Values for switching auto<->manual modes\n\
-#define pwm_thr_center_lower        // set this to pwm_thr_center_value - 200\n\
-#define pwm_thr_center_upper        // set this to pwm_thr_center_value + 200" > src/config.h; \
+#define pwm_thr_center_lower        0// set this to pwm_thr_center_value - 200\n\
+#define pwm_thr_center_upper        0// set this to pwm_thr_center_value + 200" > src/config.h; \
 		echo "Config file generated. Fill in the parameters." >&2; \
 		exit 1; \
 	fi;
