@@ -96,6 +96,8 @@ struct packet_message_pwm_high msg_pwm_high = {
 #define PIN_THROTTLE_INPUT 4
 // Teensy 3.2 onboard orange LED pin 13 == PTC5
 #define PIN_LED 13
+// Teensy 3.2 pin 14 for VESC kill switch
+#define PIN_KILL 14
 
 void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 
@@ -166,6 +168,7 @@ void handleEmergencyStopPacket(struct packet_message_bool *packet) {
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
 	if (flagStop && !flagManualOverride) {
 		digitalWrite(PIN_LED, HIGH); // turn on the LED (signals manual mode, blinking done as part of the ftm1_isr)
+		digitalWrite(PIN_KILL, LOW);
 		analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
 		analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
 	}
@@ -175,6 +178,7 @@ void handleEmergencyStopPacket(struct packet_message_bool *packet) {
 		flagManualOverride = false;
 		vescMode = true;
 		digitalWrite(PIN_LED, LOW); // turn off the LED (signals autonomous mode)
+		digitalWrite(PIN_KILL, HIGH);
 	}
 
 }
@@ -366,6 +370,9 @@ void setup() {
 	pinMode(PIN_LED, OUTPUT);
 	digitalWrite(PIN_LED, LOW); // turn off the LED
 
+	pinMode(PIN_KILL, OUTPUT);
+	digitalWrite(PIN_KILL, LOW);
+
 	pinMode(2, INPUT); // TODO: What purpose has pin 2? Maybe it is connected to the PCB?
 
 	setupFTM1();
@@ -517,6 +524,7 @@ void loop() {
 		|| (flagManualOverride && last_ftm1_irq_elapsed > 100)
 		) {
 		// set steering to straight and stop the car
+		digitalWrite(PIN_KILL, LOW);
 		analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
 		analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
 	}
