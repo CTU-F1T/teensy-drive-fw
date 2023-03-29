@@ -134,10 +134,10 @@ build: check-config check-car generate-version $(TARGET).elf
 hex: $(TARGET).hex
 
 post_compile: $(TARGET).hex
-	@$(abspath $(TOOLSPATH))/teensy_post_compile -file="$(basename $<)" -path=$(CURDIR) -tools="$(abspath $(TOOLSPATH))"
+	@LD_LIBRARY_PATH=$(LD_LIBRARY_PATH):./libraries $(abspath $(TOOLSPATH))/teensy_post_compile -file="$(basename $<)" -path=$(CURDIR) -tools="$(abspath $(TOOLSPATH))"
 
 reboot:
-	@-$(abspath $(TOOLSPATH))/teensy_reboot
+	@LD_LIBRARY_PATH=$(LD_LIBRARY_PATH):./libraries $(abspath $(TOOLSPATH))/teensy_reboot
 
 upload: post_compile reboot
 
