@@ -31,7 +31,7 @@ BUILDDIR = $(abspath $(CURDIR)/build)
 #************************************************************************
 
 # path location for Teensy Loader, teensy_post_compile and teensy_reboot
-TOOLSPATH = tools
+TOOLSPATH = teensy-template/tools
 
 # path location for Teensy 3 core
 # copied from https://github.com/PaulStoffregen/cores/tree/master/teensy3
