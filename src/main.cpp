@@ -539,6 +539,8 @@ int main() {
 	set_packet_handler(MESSAGE_ESTOP, reinterpret_cast<packet_handler>(handleEmergencyStopPacket));
 	set_packet_handler(MESSAGE_DRIVE_PWM, reinterpret_cast<packet_handler>(handleDrivePwmPacket));
 
+	digitalWrite(PIN_KILL, HIGH);
+
 	while (true) {
 		// fake_messages_loop();
 		loop();
