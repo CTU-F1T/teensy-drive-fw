@@ -32,6 +32,10 @@ struct packet_message_pwm_high msg_pwm_high = {
 	.type = MESSAGE_PWM_HIGH,
 	.size = sizeof(packet_message_pwm_high),
 };
+struct packet_message_version msg_version = {
+	.type = MESSAGE_VERSION,
+	.size = sizeof(packet_message_version),
+};
 
 // Measured values (v2):
 //   TRIM STEERING - CALM STATE
@@ -180,6 +184,15 @@ void handleEmergencyStopPacket(struct packet_message_bool *packet) {
 		digitalWrite(PIN_LED, LOW); // turn off the LED (signals autonomous mode)
 		digitalWrite(PIN_KILL, HIGH);
 	}
+
+}
+
+void handleVersionPacket(struct packet_message_version *packet) {
+
+	debug(Serial1.printf("handleVersionPacket: %s\n", packet->payload.data));
+
+	strcpy(msg_version.payload.data, VERSION);
+	send_packet(reinterpret_cast<union packet *>(&msg_version));
 
 }
 
@@ -538,6 +551,7 @@ int main() {
 
 	set_packet_handler(MESSAGE_ESTOP, reinterpret_cast<packet_handler>(handleEmergencyStopPacket));
 	set_packet_handler(MESSAGE_DRIVE_PWM, reinterpret_cast<packet_handler>(handleDrivePwmPacket));
+	set_packet_handler(MESSAGE_VERSION, reinterpret_cast<packet_handler>(handleVersionPacket));
 
 	digitalWrite(PIN_KILL, HIGH);
 

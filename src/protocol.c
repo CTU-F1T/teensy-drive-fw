@@ -7,6 +7,7 @@ static packet_handler packet_handlers[] = {
 	[MESSAGE_ESTOP] = NULL,
 	[MESSAGE_DRIVE_PWM] = NULL,
 	[MESSAGE_PWM_HIGH] = NULL,
+	[MESSAGE_VERSION] = NULL,
 };
 
 static int packet_type_to_payload_size(uint8_t type) {

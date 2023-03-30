@@ -6,7 +6,7 @@
 echo "$@"
 
 echo -n "#define VERSION \"s" >src/version.h
-git log --oneline src/main.cpp | wc -l | xargs echo -n >>src/version.h
+git log --oneline src | wc -l | xargs echo -n >>src/version.h
 echo -n ".$1 / " >> src/version.h
 git describe --dirty --always | xargs echo -n >> src/version.h
 echo -n "\"" >> src/version.h
