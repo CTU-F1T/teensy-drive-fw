@@ -32,6 +32,10 @@ struct packet_message_pwm_high msg_pwm_high = {
 	.type = MESSAGE_PWM_HIGH,
 	.size = sizeof(packet_message_pwm_high),
 };
+struct packet_message_version msg_version = {
+	.type = MESSAGE_VERSION,
+	.size = sizeof(packet_message_version),
+};
 
 // Measured values (v2):
 //   TRIM STEERING - CALM STATE
