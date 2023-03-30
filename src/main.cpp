@@ -187,6 +187,15 @@ void handleEmergencyStopPacket(struct packet_message_bool *packet) {
 
 }
 
+void handleVersionPacket(struct packet_message_version *packet) {
+
+	debug(Serial1.printf("handleVersionPacket: %s\n", packet->payload.data));
+
+	strcpy(msg_version.payload.data, VERSION);
+	send_packet(reinterpret_cast<union packet *>(&msg_version));
+
+}
+
 void ftm1_isr() {
 
 	static uint16_t capture_ovf_bits = 0;
@@ -542,6 +551,7 @@ int main() {
 
 	set_packet_handler(MESSAGE_ESTOP, reinterpret_cast<packet_handler>(handleEmergencyStopPacket));
 	set_packet_handler(MESSAGE_DRIVE_PWM, reinterpret_cast<packet_handler>(handleDrivePwmPacket));
+	set_packet_handler(MESSAGE_VERSION, reinterpret_cast<packet_handler>(handleVersionPacket));
 
 	digitalWrite(PIN_KILL, HIGH);
 
