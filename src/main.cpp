@@ -15,13 +15,39 @@ static volatile uint32_t duty_cycle_channel_1 = 0;
 static volatile uint32_t channel_0_done = 0;
 static volatile uint32_t channel_1_done = 0;
 
+// Flags
+#define ESTOP_ACTIVE        0x001
+#define REMOTE_TIMEOUT      0x002
+#define REMOTE_STR_SW       0x004
+#define REMOTE_THR_SW       0x008
+#define REMOTE_SW           0x00C
+#define DPWM_TIMEOUT        0x010
+#define DPWM_STR_SW         0x020
+#define DPWM_THR_SW         0x040
+#define DPWM_SW             0x060
+#define REMOTE_STR_USE      0x100
+#define REMOTE_THR_USE      0x200
+#define REMOTE_USE          0x300
+#define DPWM_STR_USE        0x400
+#define DPWM_THR_USE        0x800
+#define DPWM_USE            0xC00
+
+
 // App state
-static volatile boolean flagStop = false;
-static volatile boolean flagManualOverride = true;
-static volatile boolean vescMode = false;
+enum AppState : uint32_t {
+	MANUAL_MODE = REMOTE_TIMEOUT | REMOTE_STR_USE | REMOTE_THR_USE,
+	AUTONOMOUS_MODE = ESTOP_ACTIVE | REMOTE_TIMEOUT | REMOTE_SW | DPWM_TIMEOUT | DPWM_USE,
+	STOP_MODE = REMOTE_SW,
+	VESC_MODE = ESTOP_ACTIVE | REMOTE_TIMEOUT | REMOTE_SW | DPWM_TIMEOUT | DPWM_THR_SW | DPWM_STR_USE
+};
+
+
+static volatile AppState currentMode = MANUAL_MODE;
 elapsedMillis manual_blink_elapsed;
 elapsedMillis last_drive_msg_reception_elapsed;
 elapsedMillis last_ftm1_irq_elapsed;
+elapsedMillis last_thr_irq_elapsed;
+elapsedMillis last_str_irq_elapsed;
 
 // messages to send
 struct packet_message_bool msg_estop = {
@@ -103,6 +129,24 @@ struct packet_message_version msg_version = {
 // Teensy 3.2 pin 14 for VESC kill switch
 #define PIN_KILL 14
 
+#define IN_RANGE(lb, cur, ub) (lb < cur && cur < ub)
+#define NOT_IN_RANGE(lb, cur, ub) (cur < lb || ub < cur)
+
+inline void send_emergency_stop() {
+	msg_estop.payload.data = true;
+	send_packet(reinterpret_cast<union packet *>(&msg_estop));
+}
+
+inline void stop() {
+	// Stop the car from moving.
+	currentMode = STOP_MODE;
+	digitalWrite(PIN_KILL, LOW);
+	analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
+	analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
+	digitalWrite(PIN_LED, HIGH);
+	send_emergency_stop();
+}
+
 void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 
 	debug(Serial1.printf(
@@ -113,7 +157,7 @@ void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 	int16_t pwm_drive = packet->payload.pwm_drive;
 	int16_t pwm_angle = packet->payload.pwm_angle;
 
-	if (flagStop || flagManualOverride) {
+	if (!(currentMode & DPWM_STR_USE) && !(currentMode & DPWM_THR_USE)) {
 		// skip message reception completely
 		// do not update last_drive_msg_reception_elapsed
 		return;
@@ -121,7 +165,8 @@ void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 
 	// we are in the VESC mode BUT pwm_drive value is out of the center (calm) range
 	// interpret this as a request to disable the VESC mode
-	if (vescMode && (pwm_thr_center_upper < pwm_drive || pwm_drive < pwm_thr_center_lower)) {
+	//if (currentMode == VESC_MODE && (pwm_thr_center_upper < pwm_drive || pwm_drive < pwm_thr_center_lower)) {
+	if ((currentMode & DPWM_THR_SW) && NOT_IN_RANGE(pwm_thr_center_lower, pwm_drive, pwm_thr_center_upper)) {
 		NVIC_DISABLE_IRQ(IRQ_FTM1);
 		analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
 		NVIC_ENABLE_IRQ(IRQ_FTM1);
@@ -129,13 +174,13 @@ void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 		//   Experimentally it was found out that at least 80ms of "calm state" (but it might be possible
 		//   with other valid values) is required for VESC to properly handle mode switching.
 		delay(80);
-		vescMode = false;
+		currentMode = AUTONOMOUS_MODE;
 	}
 
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
 
 	// only control throttle if we are not in the VESC mode
-	if (!vescMode) {
+	if (currentMode & DPWM_THR_USE) {
 		// TODO: replace with clap(value, lower_bound_incl, upper_bound_incl)
 		if (pwm_drive < pwm_thr_lowerlimit) {
 			analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_lowerlimit); // Safety lower limit
@@ -144,16 +189,22 @@ void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 		} else {
 			analogWrite(PIN_THROTTLE_OUTPUT, pwm_drive); // Incoming data
 		}
+	} else {
+		analogWrite(PIN_THROTTLE_OUTPUT, 0);
 	}
 
 	// always control steering
 	// TODO: replace with clap(value, lower_bound_incl, upper_bound_incl)
-	if (pwm_angle < pwm_str_lowerlimit) {
-		analogWrite(PIN_STEERING_OUTPUT, pwm_str_lowerlimit); // Safety lower limit
-	} else if (pwm_angle > pwm_str_upperlimit) {
-		analogWrite(PIN_STEERING_OUTPUT, pwm_str_upperlimit); // Safety upper limit
+	if (currentMode & DPWM_STR_USE) {
+		if (pwm_angle < pwm_str_lowerlimit) {
+			analogWrite(PIN_STEERING_OUTPUT, pwm_str_lowerlimit); // Safety lower limit
+		} else if (pwm_angle > pwm_str_upperlimit) {
+			analogWrite(PIN_STEERING_OUTPUT, pwm_str_upperlimit); // Safety upper limit
+		} else {
+			analogWrite(PIN_STEERING_OUTPUT, pwm_angle); // Incoming data
+		}
 	} else {
-		analogWrite(PIN_STEERING_OUTPUT, pwm_angle); // Incoming data
+		analogWrite(PIN_STEERING_OUTPUT, 0);
 	}
 
 	NVIC_ENABLE_IRQ(IRQ_FTM1);
@@ -167,22 +218,23 @@ void handleEmergencyStopPacket(struct packet_message_bool *packet) {
 
 	debug(Serial1.printf("handleEmergencyStopPacket: %d\n", packet->payload.data));
 
-	flagStop = packet->payload.data;
+	bool flagStop = packet->payload.data;
 
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
-	if (flagStop && !flagManualOverride) {
-		digitalWrite(PIN_LED, HIGH); // turn on the LED (signals manual mode, blinking done as part of the ftm1_isr)
-		digitalWrite(PIN_KILL, LOW);
-		analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
-		analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
+	if (flagStop && (currentMode & ESTOP_ACTIVE)) {
+		//digitalWrite(PIN_LED, HIGH); // turn on the LED (signals manual mode, blinking done as part of the ftm1_isr)
+		stop();
+        //currentMode = STOP_MODE;
 	}
 	NVIC_ENABLE_IRQ(IRQ_FTM1);
 
-	if (!flagStop) {
-		flagManualOverride = false;
-		vescMode = true;
+	if (!flagStop && !(currentMode & ESTOP_ACTIVE)) {
+		//flagManualOverride = false;
+		//vescMode = true;
+		currentMode = VESC_MODE;
 		digitalWrite(PIN_LED, LOW); // turn off the LED (signals autonomous mode)
 		digitalWrite(PIN_KILL, HIGH);
+		last_drive_msg_reception_elapsed = 0;
 	}
 
 }
@@ -234,22 +286,22 @@ void ftm1_isr() {
 			duty_cycle_channel_0 = (pwm_high_c0 * 12424) / 100000;
 
 			// Steering
-			if (!flagManualOverride &&
-				(
-					duty_cycle_channel_0 > pwm_str_center_upper || duty_cycle_channel_0 < pwm_str_center_lower
-				)) { // V1 - > 9000; < 8300
+			if ((currentMode & REMOTE_STR_SW) && NOT_IN_RANGE(pwm_str_center_lower, duty_cycle_channel_0, pwm_str_center_upper))
+			{ // V1 - > 9000; < 8300
 				// TODO: this is replacement
-				msg_estop.payload.data = true;
-				send_packet(reinterpret_cast<union packet *>(&msg_estop));
+				send_emergency_stop();
 
-				flagManualOverride = true;
+				//flagManualOverride = true;
+				currentMode = MANUAL_MODE;
 			}
 
-			if (flagManualOverride) {
+			if (currentMode & REMOTE_STR_USE) {
 				analogWrite(PIN_STEERING_OUTPUT, (int) duty_cycle_channel_0);
 			}
 
 			channel_0_done = 1;
+
+			last_str_irq_elapsed = 0;
 		}
 	}
 
@@ -272,26 +324,26 @@ void ftm1_isr() {
 			duty_cycle_channel_1 = (pwm_high_c1 * 12424) / 100000;
 
 			// Throttle
-			if (!flagManualOverride &&
-				(
-					duty_cycle_channel_1 > pwm_thr_center_upper || duty_cycle_channel_1 < pwm_thr_center_lower
-				)) {
+			if ((currentMode & REMOTE_THR_SW) && NOT_IN_RANGE(pwm_thr_center_lower, duty_cycle_channel_1, pwm_thr_center_upper))
+			{
 				// TODO: this is replacement
-				msg_estop.payload.data = true;
-				send_packet(reinterpret_cast<union packet *>(&msg_estop));
+				send_emergency_stop();
 
-				flagManualOverride = true;
+				//flagManualOverride = true;
+				currentMode = MANUAL_MODE;
 			}
 
-			if (flagManualOverride) {
+			if (currentMode & REMOTE_THR_USE) {
 				analogWrite(PIN_THROTTLE_OUTPUT, (int) duty_cycle_channel_1);
 			}
 
 			channel_1_done = 1;
+
+			last_thr_irq_elapsed = 0;
 		}
 	}
 
-	if (flagManualOverride && manual_blink_elapsed > 250) {
+	if (currentMode == MANUAL_MODE && manual_blink_elapsed > 250) {
 		if (LED_state == LOW) {
 			LED_state = HIGH;
 		} else {
@@ -525,21 +577,18 @@ void loop() {
 	// TODO: this is replacement of nh.spinOnce();
 	try_receive_packet();
 
-	// drive command timeout
+	// Timeout handler
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
-	if (vescMode && !flagManualOverride && !flagStop) {
-		// analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
-		analogWrite(PIN_THROTTLE_OUTPUT, 0);
-	} else if (
-		// handles drive messages stream lost in the autonomous mode
-		(!flagManualOverride && !flagStop && last_drive_msg_reception_elapsed > 300)
-		// handles RF PWM signal loss in the manual override mode
-		|| (flagManualOverride && last_ftm1_irq_elapsed > 100)
-		) {
-		// set steering to straight and stop the car
-		digitalWrite(PIN_KILL, LOW);
-		analogWrite(PIN_STEERING_OUTPUT, pwm_str_center_value);
-		analogWrite(PIN_THROTTLE_OUTPUT, pwm_thr_center_value);
+	if (
+		(
+			// Stop the car when remote is out of range or powered off.
+			(currentMode & REMOTE_TIMEOUT) && (last_thr_irq_elapsed > 100 || last_str_irq_elapsed > 100)
+		) || (
+			// Stop the car when no message is received from the computer.
+			(currentMode & DPWM_TIMEOUT) && (last_drive_msg_reception_elapsed > 300)
+		)
+	   ) {
+		stop();
 	}
 	NVIC_ENABLE_IRQ(IRQ_FTM1);
 
