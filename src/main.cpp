@@ -62,6 +62,10 @@ struct packet_message_version msg_version = {
 	.type = MESSAGE_VERSION,
 	.size = sizeof(packet_message_version),
 };
+struct packet_message_encoder msg_encoder = {
+	.type = MESSAGE_ENCODER,
+	.size = sizeof(packet_message_encoder),
+};
 
 // Measured values (v2):
 //   TRIM STEERING - CALM STATE
