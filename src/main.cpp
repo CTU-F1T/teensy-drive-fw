@@ -160,6 +160,7 @@ struct wheel_encoder_struct {
 };
 
 struct wheel_encoder_struct wheel_encoder = {0};
+struct wheel_encoder_struct wheel_encoder_last = {0};
 struct wheel_encoder_struct wheel_encoder_copy;
 
 
@@ -658,7 +659,7 @@ void loop() {
 	// Encoder handler
 	if (wheel_encoder.time_elapsed > 100) {
 		wheel_encoder_copy = wheel_encoder;
-		memset(&wheel_encoder, 0, sizeof(wheel_encoder_struct));
+		//memset(&wheel_encoder, 0, sizeof(wheel_encoder_struct));
 		wheel_encoder.time_elapsed = 0;
 
 		msg_encoder.payload.fl_position = wheel_encoder_copy.encoder_fl;
@@ -674,13 +675,14 @@ void loop() {
 		msg_encoder.payload.rr_speed = wheel_encoder_copy.encoder_rr * ENCODER_TO_MMS / wheel_encoder_copy.time_elapsed;
 		*/
 
-		msg_encoder.payload.fl_speed = wheel_encoder_copy.encoder_fl * 1000 / wheel_encoder_copy.time_elapsed;
-		msg_encoder.payload.fr_speed = wheel_encoder_copy.encoder_fr * 1000 / wheel_encoder_copy.time_elapsed;
-		msg_encoder.payload.rl_speed = wheel_encoder_copy.encoder_rl * 1000 / wheel_encoder_copy.time_elapsed;
-		msg_encoder.payload.rr_speed = wheel_encoder_copy.encoder_rr * 1000 / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.fl_speed = (wheel_encoder_copy.encoder_fl - wheel_encoder_last.encoder_fl) * 1000 / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.fr_speed = (wheel_encoder_copy.encoder_fr - wheel_encoder_last.encoder_fr) * 1000 / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.rl_speed = (wheel_encoder_copy.encoder_rl - wheel_encoder_last.encoder_rl) * 1000 / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.rr_speed = (wheel_encoder_copy.encoder_rr - wheel_encoder_last.encoder_rr) * 1000 / wheel_encoder_copy.time_elapsed;
 
 
 		send_packet(reinterpret_cast<union packet *>(&msg_encoder));
+		wheel_encoder_last = wheel_encoder_copy;
 	}
 }
 
