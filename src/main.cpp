@@ -48,6 +48,7 @@ elapsedMillis last_drive_msg_reception_elapsed;
 elapsedMillis last_ftm1_irq_elapsed;
 elapsedMillis last_thr_irq_elapsed;
 elapsedMillis last_str_irq_elapsed;
+// elapsedMillis wheel_encoder_elapsed; (defined later)
 
 // messages to send
 struct packet_message_bool msg_estop = {
@@ -61,6 +62,10 @@ struct packet_message_pwm_high msg_pwm_high = {
 struct packet_message_version msg_version = {
 	.type = MESSAGE_VERSION,
 	.size = sizeof(packet_message_version),
+};
+struct packet_message_encoder msg_encoder = {
+	.type = MESSAGE_ENCODER,
+	.size = sizeof(packet_message_encoder),
 };
 
 // Measured values (v2):
@@ -128,9 +133,35 @@ struct packet_message_version msg_version = {
 #define PIN_LED 13
 // Teensy 3.2 pin 14 for VESC kill switch
 #define PIN_KILL 14
+// Teensy 3.2 pin 16 for wheel encoder on front left wheel
+#define PIN_WHEEL_FL 16
+// Teensy 3.2 pin 17 for wheel encoder on front right wheel
+#define PIN_WHEEL_FR 17
+// Teensy 3.2 pin 18 for wheel encoder on rear left wheel
+#define PIN_WHEEL_RL 18
+// Teensy 3.2 pin 19 for wheel encoder on rear right wheel
+#define PIN_WHEEL_RR 19
 
 #define IN_RANGE(lb, cur, ub) (lb < cur && cur < ub)
 #define NOT_IN_RANGE(lb, cur, ub) (cur < lb || ub < cur)
+
+
+// Wheel encoder
+#define ENCODER_TEETH 30
+#define ENCODER_TO_MMS (345400 / (2 * ENCODER_TEETH))
+
+// Encoder struct
+struct wheel_encoder_struct {
+	volatile int32_t encoder_fl;
+	volatile int32_t encoder_fr;
+	volatile int32_t encoder_rl;
+	volatile int32_t encoder_rr;
+	elapsedMillis time_elapsed;
+};
+
+struct wheel_encoder_struct wheel_encoder = {0};
+struct wheel_encoder_struct wheel_encoder_copy;
+
 
 inline void send_emergency_stop() {
 	msg_estop.payload.data = true;
@@ -415,6 +446,26 @@ void setupFTM1() {
 
 }
 
+// Wheel encoder ISR
+void isr_encoder_fl() {
+    wheel_encoder.encoder_fl++;
+}
+
+
+void isr_encoder_fr() {
+    wheel_encoder.encoder_fr++;
+}
+
+
+void isr_encoder_rl() {
+    wheel_encoder.encoder_rl++;
+}
+
+
+void isr_encoder_rr() {
+    wheel_encoder.encoder_rr++;
+}
+
 void setup() {
 
 	if (DEBUG) {
@@ -437,6 +488,18 @@ void setup() {
 
 	pinMode(PIN_KILL, OUTPUT);
 	digitalWrite(PIN_KILL, LOW);
+
+    pinMode(PIN_WHEEL_FL, INPUT);
+    attachInterrupt(digitalPinToInterrupt(PIN_WHEEL_FL), isr_encoder_fl, CHANGE);
+
+    pinMode(PIN_WHEEL_FR, INPUT);
+    attachInterrupt(digitalPinToInterrupt(PIN_WHEEL_FR), isr_encoder_fr, CHANGE);
+
+    pinMode(PIN_WHEEL_RL, INPUT);
+    attachInterrupt(digitalPinToInterrupt(PIN_WHEEL_RL), isr_encoder_rl, CHANGE);
+
+    pinMode(PIN_WHEEL_RR, INPUT);
+    attachInterrupt(digitalPinToInterrupt(PIN_WHEEL_RR), isr_encoder_rr, CHANGE);
 
 	pinMode(2, INPUT); // TODO: What purpose has pin 2? Maybe it is connected to the PCB?
 
@@ -592,6 +655,33 @@ void loop() {
 	}
 	NVIC_ENABLE_IRQ(IRQ_FTM1);
 
+	// Encoder handler
+	if (wheel_encoder.time_elapsed > 100) {
+		wheel_encoder_copy = wheel_encoder;
+		memset(&wheel_encoder, 0, sizeof(wheel_encoder_struct));
+		wheel_encoder.time_elapsed = 0;
+
+		msg_encoder.payload.fl_position = wheel_encoder_copy.encoder_fl;
+		msg_encoder.payload.fr_position = wheel_encoder_copy.encoder_fr;
+		msg_encoder.payload.rl_position = wheel_encoder_copy.encoder_rl;
+		msg_encoder.payload.rr_position = wheel_encoder_copy.encoder_rr;
+
+		/*
+		// This can be used to convert speed to the mm/s.
+		msg_encoder.payload.fl_speed = wheel_encoder_copy.encoder_fl * ENCODER_TO_MMS / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.fr_speed = wheel_encoder_copy.encoder_fr * ENCODER_TO_MMS / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.rl_speed = wheel_encoder_copy.encoder_rl * ENCODER_TO_MMS / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.rr_speed = wheel_encoder_copy.encoder_rr * ENCODER_TO_MMS / wheel_encoder_copy.time_elapsed;
+		*/
+
+		msg_encoder.payload.fl_speed = wheel_encoder_copy.encoder_fl * 1000 / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.fr_speed = wheel_encoder_copy.encoder_fr * 1000 / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.rl_speed = wheel_encoder_copy.encoder_rl * 1000 / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.rr_speed = wheel_encoder_copy.encoder_rr * 1000 / wheel_encoder_copy.time_elapsed;
+
+
+		send_packet(reinterpret_cast<union packet *>(&msg_encoder));
+	}
 }
 
 int main() {

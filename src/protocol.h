@@ -66,11 +66,31 @@ struct packet_message_version {
 	uint16_t checksum; // big endian (MSB first)
 } __attribute__((__packed__));
 
+struct message_encoder {
+	int32_t fl_position;
+	int32_t fr_position;
+	int32_t rl_position;
+	int32_t rr_position;
+
+	int32_t fl_speed;
+	int32_t fr_speed;
+	int32_t rl_speed;
+	int32_t rr_speed;
+};
+
+struct packet_message_encoder {
+	uint8_t type;
+	uint8_t size;
+	struct message_encoder payload;
+	uint16_t checksum; // big endian (MSB first)
+} __attribute__((__packed__));
+
 union packet {
 	struct packet_message_bool estop;
 	struct packet_message_drive_values drive_pwm;
 	struct packet_message_pwm_high pwm_high;
 	struct packet_message_version version;
+	struct packet_message_encoder encoder;
 };
 
 enum packet_type {
@@ -78,6 +98,7 @@ enum packet_type {
 	MESSAGE_DRIVE_PWM = 2,
 	MESSAGE_PWM_HIGH = 3,
 	MESSAGE_VERSION = 4,
+	MESSAGE_ENCODER = 5,
 };
 
 static const int packet_type_to_payload_size_table[] = {
@@ -86,6 +107,7 @@ static const int packet_type_to_payload_size_table[] = {
 	[MESSAGE_DRIVE_PWM] = sizeof(struct message_drive_values),
 	[MESSAGE_PWM_HIGH] = sizeof(struct message_pwm_high),
 	[MESSAGE_VERSION] = sizeof(struct message_version),
+	[MESSAGE_ENCODER] = sizeof(struct message_encoder),
 };
 
 #define packet_max_size sizeof(union packet)
