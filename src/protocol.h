@@ -67,7 +67,15 @@ struct packet_message_version {
 } __attribute__((__packed__));
 
 struct message_encoder {
-	long long data;
+	int32_t fl_position;
+	int32_t fr_position;
+	int32_t rl_position;
+	int32_t rr_position;
+
+	int32_t fl_speed;
+	int32_t fr_speed;
+	int32_t rl_speed;
+	int32_t rr_speed;
 };
 
 struct packet_message_encoder {
