@@ -151,12 +151,37 @@ struct packet_message_encoder msg_encoder = {
 #define ENCODER_TO_MMS (345400 / (2 * ENCODER_TEETH))
 
 // Encoder struct
+#define SPEED_ARR_LENGTH 10
+#define ENCODER_TIMEOUT 100000 // us
+
 struct wheel_encoder_struct {
+	// Position of encoders
 	volatile int32_t encoder_fl;
 	volatile int32_t encoder_fr;
 	volatile int32_t encoder_rl;
 	volatile int32_t encoder_rr;
+
+	// Time used for reporting the encoder status
 	elapsedMillis time_elapsed;
+
+	// Speed of the encoders
+	elapsedMicros time_fl;
+	elapsedMicros time_fr;
+	elapsedMicros time_rl;
+	elapsedMicros time_rr;
+	volatile int32_t speed_fl_arr_i;
+	volatile int32_t speed_fr_arr_i;
+	volatile int32_t speed_rl_arr_i;
+	volatile int32_t speed_rr_arr_i;
+	volatile int32_t speed_fl_arr[SPEED_ARR_LENGTH];
+	volatile int32_t speed_fr_arr[SPEED_ARR_LENGTH];
+	volatile int32_t speed_rl_arr[SPEED_ARR_LENGTH];
+	volatile int32_t speed_rr_arr[SPEED_ARR_LENGTH];
+
+	volatile bool rotating_fl;
+	volatile bool rotating_fr;
+	volatile bool rotating_rl;
+	volatile bool rotating_rr;
 };
 
 struct wheel_encoder_struct wheel_encoder = {0};
@@ -449,22 +474,57 @@ void setupFTM1() {
 
 // Wheel encoder ISR
 void isr_encoder_fl() {
+	// Increment encoder position
     wheel_encoder.encoder_fl++;
+
+	// If stopped, start rotating again
+	// Yes, we lose one interrupt, but we have no idea about time_fl
+	if (wheel_encoder.rotating_fl) {
+		wheel_encoder.speed_fl_arr[wheel_encoder.speed_fl_arr_i++] = wheel_encoder.time_fl;
+		wheel_encoder.speed_fl_arr_i %= SPEED_ARR_LENGTH;
+	} else {
+		wheel_encoder.rotating_fl = true;
+	}
+	wheel_encoder.time_fl = 0;
 }
 
 
 void isr_encoder_fr() {
     wheel_encoder.encoder_fr++;
+
+	if (wheel_encoder.rotating_fr) {
+		wheel_encoder.speed_fr_arr[wheel_encoder.speed_fr_arr_i++] = wheel_encoder.time_fr;
+		wheel_encoder.speed_fr_arr_i %= SPEED_ARR_LENGTH;
+	} else {
+		wheel_encoder.rotating_fr = true;
+	}
+	wheel_encoder.time_fr = 0;
 }
 
 
 void isr_encoder_rl() {
     wheel_encoder.encoder_rl++;
+
+	if (wheel_encoder.rotating_rl) {
+		wheel_encoder.speed_rl_arr[wheel_encoder.speed_rl_arr_i++] = wheel_encoder.time_rl;
+		wheel_encoder.speed_rl_arr_i %= SPEED_ARR_LENGTH;
+	} else {
+		wheel_encoder.rotating_rl = true;
+	}
+	wheel_encoder.time_rl = 0;
 }
 
 
 void isr_encoder_rr() {
     wheel_encoder.encoder_rr++;
+
+	if (wheel_encoder.rotating_rr) {
+		wheel_encoder.speed_rr_arr[wheel_encoder.speed_rr_arr_i++] = wheel_encoder.time_rr;
+		wheel_encoder.speed_rr_arr_i %= SPEED_ARR_LENGTH;
+	} else {
+		wheel_encoder.rotating_rr = true;
+	}
+	wheel_encoder.time_rr = 0;
 }
 
 void setup() {
@@ -657,10 +717,12 @@ void loop() {
 	NVIC_ENABLE_IRQ(IRQ_FTM1);
 
 	// Encoder handler
-	if (wheel_encoder.time_elapsed > 100) {
+	if (wheel_encoder.time_elapsed > 9) { // therefore >= 10
+		noInterrupts();
 		wheel_encoder_copy = wheel_encoder;
 		//memset(&wheel_encoder, 0, sizeof(wheel_encoder_struct));
 		wheel_encoder.time_elapsed = 0;
+		interrupts();
 
 		msg_encoder.payload.fl_position = wheel_encoder_copy.encoder_fl;
 		msg_encoder.payload.fr_position = wheel_encoder_copy.encoder_fr;
@@ -675,11 +737,49 @@ void loop() {
 		msg_encoder.payload.rr_speed = wheel_encoder_copy.encoder_rr * ENCODER_TO_MMS / wheel_encoder_copy.time_elapsed;
 		*/
 
+		// Speed according to the difference in the encoder count.
 		msg_encoder.payload.fl_speed = (wheel_encoder_copy.encoder_fl - wheel_encoder_last.encoder_fl) * 1000 / wheel_encoder_copy.time_elapsed;
 		msg_encoder.payload.fr_speed = (wheel_encoder_copy.encoder_fr - wheel_encoder_last.encoder_fr) * 1000 / wheel_encoder_copy.time_elapsed;
 		msg_encoder.payload.rl_speed = (wheel_encoder_copy.encoder_rl - wheel_encoder_last.encoder_rl) * 1000 / wheel_encoder_copy.time_elapsed;
 		msg_encoder.payload.rr_speed = (wheel_encoder_copy.encoder_rr - wheel_encoder_last.encoder_rr) * 1000 / wheel_encoder_copy.time_elapsed;
 
+
+		// Speed according to the time differences.
+		// As this one stutters a lot, it is averaged.
+		msg_encoder.payload.fl_speed2 = 0;
+		msg_encoder.payload.fr_speed2 = 0;
+		msg_encoder.payload.rl_speed2 = 0;
+		msg_encoder.payload.rr_speed2 = 0;
+
+
+		if (wheel_encoder_copy.rotating_fl && wheel_encoder_copy.time_fl > ENCODER_TIMEOUT) {
+			memset((void *)&wheel_encoder.speed_fl_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
+			wheel_encoder.rotating_fl = false;
+		}
+		if (wheel_encoder_copy.rotating_fr && wheel_encoder_copy.time_fr > ENCODER_TIMEOUT) {
+			memset((void *)&wheel_encoder.speed_fr_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
+			wheel_encoder.rotating_fr = false;
+		}
+		if (wheel_encoder_copy.rotating_rl && wheel_encoder_copy.time_rl > ENCODER_TIMEOUT) {
+			memset((void *)&wheel_encoder.speed_rl_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
+			wheel_encoder.rotating_rl = false;
+		}
+		if (wheel_encoder_copy.rotating_rr && wheel_encoder_copy.time_rr > ENCODER_TIMEOUT) {
+			memset((void *)&wheel_encoder.speed_rr_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
+			wheel_encoder.rotating_rr = false;
+		}
+
+		for (int i = 0; i < SPEED_ARR_LENGTH; i++) {
+			msg_encoder.payload.fl_speed2 += wheel_encoder_copy.speed_fl_arr[i];
+			msg_encoder.payload.fr_speed2 += wheel_encoder_copy.speed_fr_arr[i];
+			msg_encoder.payload.rl_speed2 += wheel_encoder_copy.speed_rl_arr[i];
+			msg_encoder.payload.rr_speed2 += wheel_encoder_copy.speed_rr_arr[i];
+		}
+
+		msg_encoder.payload.fl_speed2 /= SPEED_ARR_LENGTH;
+		msg_encoder.payload.fr_speed2 /= SPEED_ARR_LENGTH;
+		msg_encoder.payload.rl_speed2 /= SPEED_ARR_LENGTH;
+		msg_encoder.payload.rr_speed2 /= SPEED_ARR_LENGTH;
 
 		send_packet(reinterpret_cast<union packet *>(&msg_encoder));
 		wheel_encoder_last = wheel_encoder_copy;

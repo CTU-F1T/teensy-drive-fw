@@ -76,6 +76,11 @@ struct message_encoder {
 	int32_t fr_speed;
 	int32_t rl_speed;
 	int32_t rr_speed;
+
+	int32_t fl_speed2;
+	int32_t fr_speed2;
+	int32_t rl_speed2;
+	int32_t rr_speed2;
 };
 
 struct packet_message_encoder {
