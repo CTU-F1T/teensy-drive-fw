@@ -194,6 +194,7 @@ constexpr int32_t time_conversion = (1e9 * PI * WHEEL_RADIUS) / (ENCODER_TEETH);
 
 // Encoder struct
 #define SPEED_ARR_LENGTH 10
+#define USE_ENCODER_TIMEOUT 0
 #define ENCODER_TIMEOUT 100000 // us
 #define USE_ENCODER_CONSTRAIN 0
 #define ENCODER_TIME_CONSTRAIN 300 //us
@@ -827,17 +828,29 @@ void loop() {
 		debug(
 			Serial1.printf("%u %u %u %u %u %u %u %u\r\n",
 				average_velocity_fl,
-				//(5756667 / (wheel_encoder.time_fl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fl) ),
+#if USE_ENCODER_TIMEOUT == 1
+				(time_conversion / (wheel_encoder.time_fl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fl) ),
+#else
 				(time_conversion / wheel_encoder.speed_fl),
+#endif
 				average_velocity_fr,
-				//(5756667 / (wheel_encoder.time_fr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fr) ),
+#if USE_ENCODER_TIMEOUT == 1
+				(time_conversion / (wheel_encoder.time_fr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fr) ),
+#else
 				(time_conversion / wheel_encoder.speed_fr),
+#endif
 				average_velocity_rl,
-				//(5756667 / (wheel_encoder.time_rl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rl) )
+#if USE_ENCODER_TIMEOUT == 1
+				(time_conversion / (wheel_encoder.time_rl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rl) ),
+#else
 				(time_conversion / wheel_encoder.speed_rl),
+#endif
 				average_velocity_rr,
-				//(5756667 / (wheel_encoder.time_rr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rr) )
+#if USE_ENCODER_TIMEOUT == 1
+				(time_conversion / (wheel_encoder.time_rr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rr) )
+#else
 				(time_conversion / wheel_encoder.speed_rr)
+#endif
 			)
 		);
 
