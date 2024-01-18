@@ -148,7 +148,49 @@ struct packet_message_encoder msg_encoder = {
 
 // Wheel encoder
 #define ENCODER_TEETH 30
+#define WHEEL_RADIUS 0.055		// [m]
+//#define PI 3.1415926535898 	// defined in teensy3/wiring.h
 #define ENCODER_TO_MMS (345400 / (2 * ENCODER_TEETH))
+#define ENCODER_AVERAGE_PERIOD 100	// [ms]
+#define ENCODER_SAMPLING_PERIOD 10	// [ms]
+
+/* Conversion of units.
+ *
+ * 1) Counting pulses
+ * 	We obtain `n` pulses in `t` (= ENCODER_AVERAGE_PERIOD) ms.
+ *  - This is given as difference in the wheel driven distance.
+ *  Estimated speed is `n/t` [pulses/ms].
+ *
+ *  To obtain [mm/s] we do this:
+ *  	* 1000 : [pulses/s]
+ *		/ (2 * ENCODER_TEETH) : [rotations/s]
+ *		* (2 * PI * WHEEL_RADIUS) : [m/s]
+ *		* 1000 : [mm/s]
+ *
+ *	Note: We work with mm/s to use only integers.
+ *
+ *  Long expression should be:
+ *  (1e3 * 2 * PI * WHEEL_RADIUS * 1e3) / (2 * ENCODER_TEETH * t)
+ */
+constexpr int32_t pulses_conversion_n = (1e6 * WHEEL_RADIUS) * PI;
+constexpr int32_t pulses_conversion_d = ENCODER_TEETH * ENCODER_AVERAGE_PERIOD;
+/*
+ * 2) Measuring time between interrupts
+ *	We obtain `t` us between two pulses.
+ *  Estimated speed is then `1/t` [pulses/us].
+ *
+ *	To obtain [mm/s] we do this:
+ * 		* 1e6 : [pulses/s]
+ *		/ (2 * ENCODER_TEETH) : [rotations/s]
+ *		* (2 * PI * WHEEL_RADIUS) : [m/s]
+ *		* 1000 : [mm/s]
+ *
+ *	Similarly to (1) we work with mm/s to use only integers.
+ *
+ * 	Long expression should be:
+ *	(1 / t) * (1e6 * 2 * PI * WHEEL_RADIUS * 1e3) / (2 * ENCODER_TEETH)
+ */
+constexpr int32_t time_conversion = (1e9 * PI * WHEEL_RADIUS) / (ENCODER_TEETH);
 
 // Encoder struct
 #define SPEED_ARR_LENGTH 10
@@ -777,7 +819,7 @@ void loop() {
 
 
 #if DEBUG_MEASUREMENT == 1
-	if (encoder_sampling > 9) {
+	if (encoder_sampling >= ENCODER_SAMPLING_PERIOD) {
 		/*estimated_velocity_fl = (average_velocity_fl * 0.3 + estimated_velocity_fl * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_fl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fl) ) * 0.2;
 		estimated_velocity_fr = (average_velocity_fr * 0.3 + estimated_velocity_fr * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_fr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fr) ) * 0.2;
 		estimated_velocity_rl = (average_velocity_rl * 0.3 + estimated_velocity_rl * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_rl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rl) ) * 0.2;
@@ -786,33 +828,33 @@ void loop() {
 			Serial1.printf("%u %u %u %u %u %u %u %u\r\n",
 				average_velocity_fl,
 				//(5756667 / (wheel_encoder.time_fl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fl) ),
-				(5756667 / wheel_encoder.speed_fl),
+				(time_conversion / wheel_encoder.speed_fl),
 				average_velocity_fr,
 				//(5756667 / (wheel_encoder.time_fr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fr) ),
-				(5756667 / wheel_encoder.speed_fr),
+				(time_conversion / wheel_encoder.speed_fr),
 				average_velocity_rl,
 				//(5756667 / (wheel_encoder.time_rl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rl) )
-				(5756667 / wheel_encoder.speed_rl),
+				(time_conversion / wheel_encoder.speed_rl),
 				average_velocity_rr,
 				//(5756667 / (wheel_encoder.time_rr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rr) )
-				(5756667 / wheel_encoder.speed_rr)
+				(time_conversion / wheel_encoder.speed_rr)
 			)
 		);
 
 		encoder_sampling = 0;
 	}
 
-	if (encoder_average > 99) {
+	if (encoder_average >= ENCODER_AVERAGE_PERIOD) {
 		// Obtain average speed every 100ms.
 		int32_t encoder_val_fl = wheel_encoder.encoder_fl;
 		int32_t encoder_val_fr = wheel_encoder.encoder_fr;
 		int32_t encoder_val_rl = wheel_encoder.encoder_rl;
 		int32_t encoder_val_rr = wheel_encoder.encoder_rr;
 
-		average_velocity_fl = (encoder_val_fl - last_encoder_fl) * 115/2; // mm/s
-		average_velocity_fr = (encoder_val_fr - last_encoder_fr) * 115/2; // mm/s
-		average_velocity_rl = (encoder_val_rl - last_encoder_rl) * 115/2; // mm/s
-		average_velocity_rr = (encoder_val_rr - last_encoder_rr) * 115/2; // mm/s
+		average_velocity_fl = (encoder_val_fl - last_encoder_fl) * pulses_conversion_n / pulses_conversion_d;
+		average_velocity_fr = (encoder_val_fr - last_encoder_fr) * pulses_conversion_n / pulses_conversion_d;
+		average_velocity_rl = (encoder_val_rl - last_encoder_rl) * pulses_conversion_n / pulses_conversion_d;
+		average_velocity_rr = (encoder_val_rr - last_encoder_rr) * pulses_conversion_n / pulses_conversion_d;
 
 		//estimated_velocity_fl
 		last_encoder_fl = encoder_val_fl;
