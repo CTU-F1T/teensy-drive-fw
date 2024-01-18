@@ -1,8 +1,18 @@
 #include <Arduino.h>
+#include <vector>
 #include "version.h"
 #include "config.h"
 #include "protocol.h"
 #include "debug.h"
+
+// This is so STL things link.
+// https://forum.pjrc.com/index.php?threads/stl-and-undefined-reference-to-std-__throw_bad_alloc.49802/
+namespace std {
+void __throw_bad_alloc() {
+  Serial.println("Unable to allocate memory");
+  //while (true) {}
+}
+}
 
 // Input capture FTM register values
 #define FTM_SC_VALUE (FTM_SC_TOIE | FTM_SC_CLKS(1) | FTM_SC_PS(0))
@@ -145,6 +155,14 @@ struct packet_message_encoder msg_encoder = {
 #define IN_RANGE(lb, cur, ub) (lb < cur && cur < ub)
 #define NOT_IN_RANGE(lb, cur, ub) (cur < lb || ub < cur)
 
+// Measure servo delays
+#define DEBUG_SERVO_DELAYS 1
+#if DEBUG_SERVO_DELAYS == 1
+std::vector<int> servo_delays;
+
+elapsedMillis servo_delays_report;
+elapsedMicros servo_timer;
+#endif
 
 // Wheel encoder
 #define ENCODER_TEETH 30
@@ -279,12 +297,17 @@ inline void stop() {
 }
 
 void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
-
+#if DEBUG_SERVO_DELAYS == 1
+	//servo_delays.emplace_back(servo_timer);
+	int stimer = servo_timer;
+	Serial1.printf("%d,", stimer);
+	servo_timer = 0;
+#else
 	debug(Serial1.printf(
 		"hDPP: drive=%d angle=%d\n",
 		packet->payload.pwm_drive, packet->payload.pwm_angle
 	));
-
+#endif
 	int16_t pwm_drive = packet->payload.pwm_drive;
 	int16_t pwm_angle = packet->payload.pwm_angle;
 
@@ -346,9 +369,9 @@ void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 }
 
 void handleEmergencyStopPacket(struct packet_message_bool *packet) {
-
+#if DEBUG_SERVO_DELAYS == 0
 	debug(Serial1.printf("handleEmergencyStopPacket: %d\n", packet->payload.data));
-
+#endif
 	bool flagStop = packet->payload.data;
 
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
@@ -371,9 +394,9 @@ void handleEmergencyStopPacket(struct packet_message_bool *packet) {
 }
 
 void handleVersionPacket(struct packet_message_version *packet) {
-
+#if DEBUG_SERVO_DELAYS == 0
 	debug(Serial1.printf("handleVersionPacket: %s\n", packet->payload.data));
-
+#endif
 	strcpy(msg_version.payload.data, VERSION);
 	send_packet(reinterpret_cast<union packet *>(&msg_version));
 
@@ -666,6 +689,10 @@ void setup() {
 
 	pinMode(2, INPUT); // TODO: What purpose has pin 2? Maybe it is connected to the PCB?
 
+#if DEBUG_SERVO_DELAYS == 1
+	servo_delays.reserve(500);
+#endif
+
 	setupFTM1();
 
 	// nh.getHardware()->setBaud(115200);
@@ -784,6 +811,25 @@ void fake_messages_loop() {
 	}
 
 }
+
+#if DEBUG_SERVO_DELAYS == 1
+void report_servo_delays() {
+	return;
+	if (servo_delays_report > 10000) {
+		std::vector<int> delays = servo_delays;
+
+		for (int delay : delays) {
+			Serial1.printf("%d,", delay);
+		}
+
+		Serial1.printf("\r\n");
+
+		servo_delays_report = 0;
+		servo_delays.clear();
+	}
+}
+#endif
+
 
 void loop() {
 
@@ -962,6 +1008,9 @@ int main() {
 
 	while (true) {
 		// fake_messages_loop();
+#if DEBUG_SERVO_DELAYS == 1
+		report_servo_delays();
+#endif
 		loop();
 		// yield(); // no need to call it as we are not interested in the events it produces
 	}
