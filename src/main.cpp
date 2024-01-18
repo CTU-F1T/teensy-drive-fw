@@ -155,6 +155,7 @@ struct packet_message_encoder msg_encoder = {
 #define ENCODER_TIMEOUT 100000 // us
 #define USE_ENCODER_CONSTRAIN 0
 #define ENCODER_TIME_CONSTRAIN 300 //us
+#define DEBUG_MEASUREMENT 1
 
 struct wheel_encoder_struct {
 	// Position of encoders
@@ -180,6 +181,13 @@ struct wheel_encoder_struct {
 	volatile int32_t speed_rl_arr[SPEED_ARR_LENGTH];
 	volatile int32_t speed_rr_arr[SPEED_ARR_LENGTH];
 
+#if DEBUG_MEASUREMENT == 1
+	volatile int32_t speed_fl;
+	volatile int32_t speed_fr;
+	volatile int32_t speed_rl;
+	volatile int32_t speed_rr;
+#endif
+
 	volatile bool rotating_fl;
 	volatile bool rotating_fr;
 	volatile bool rotating_rl;
@@ -189,6 +197,27 @@ struct wheel_encoder_struct {
 struct wheel_encoder_struct wheel_encoder = {0};
 struct wheel_encoder_struct wheel_encoder_last = {0};
 struct wheel_encoder_struct wheel_encoder_copy;
+
+#if DEBUG_MEASUREMENT == 1
+elapsedMillis encoder_sampling;
+elapsedMillis encoder_average;
+
+volatile int32_t last_encoder_fl = 0;
+volatile int32_t average_velocity_fl = 0;
+volatile int32_t estimated_velocity_fl = 0;
+
+volatile int32_t last_encoder_fr = 0;
+volatile int32_t average_velocity_fr = 0;
+volatile int32_t estimated_velocity_fr = 0;
+
+volatile int32_t last_encoder_rl = 0;
+volatile int32_t average_velocity_rl = 0;
+volatile int32_t estimated_velocity_rl = 0;
+
+volatile int32_t last_encoder_rr = 0;
+volatile int32_t average_velocity_rr = 0;
+volatile int32_t estimated_velocity_rr = 0;
+#endif
 
 
 inline void send_emergency_stop() {
@@ -486,6 +515,9 @@ void isr_encoder_fl() {
 #else
 	if (wheel_encoder.rotating_fl) {
 #endif
+#if DEBUG_MEASUREMENT == 1
+		wheel_encoder.speed_fl = wheel_encoder.time_fl;
+#endif
 		wheel_encoder.speed_fl_arr[wheel_encoder.speed_fl_arr_i++] = wheel_encoder.time_fl;
 		wheel_encoder.speed_fl_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -502,6 +534,9 @@ void isr_encoder_fr() {
 	if (wheel_encoder.rotating_fr && wheel_encoder.time_fr > ENCODER_TIME_CONSTRAIN) {
 #else
 	if (wheel_encoder.rotating_fr) {
+#endif
+#if DEBUG_MEASUREMENT == 1
+		wheel_encoder.speed_fr = wheel_encoder.time_fr;
 #endif
 		wheel_encoder.speed_fr_arr[wheel_encoder.speed_fr_arr_i++] = wheel_encoder.time_fr;
 		wheel_encoder.speed_fr_arr_i %= SPEED_ARR_LENGTH;
@@ -520,6 +555,9 @@ void isr_encoder_rl() {
 #else
 	if (wheel_encoder.rotating_rl) {
 #endif
+#if DEBUG_MEASUREMENT == 1
+		wheel_encoder.speed_rl = wheel_encoder.time_rl;
+#endif
 		wheel_encoder.speed_rl_arr[wheel_encoder.speed_rl_arr_i++] = wheel_encoder.time_rl;
 		wheel_encoder.speed_rl_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -536,6 +574,9 @@ void isr_encoder_rr() {
 	if (wheel_encoder.rotating_rr && wheel_encoder.time_rr > ENCODER_TIME_CONSTRAIN) {
 #else
 	if (wheel_encoder.rotating_rr) {
+#endif
+#if DEBUG_MEASUREMENT == 1
+		wheel_encoder.speed_rr = wheel_encoder.time_rr;
 #endif
 		wheel_encoder.speed_rr_arr[wheel_encoder.speed_rr_arr_i++] = wheel_encoder.time_rr;
 		wheel_encoder.speed_rr_arr_i %= SPEED_ARR_LENGTH;
@@ -734,6 +775,54 @@ void loop() {
 	}
 	NVIC_ENABLE_IRQ(IRQ_FTM1);
 
+
+#if DEBUG_MEASUREMENT == 1
+	if (encoder_sampling > 9) {
+		/*estimated_velocity_fl = (average_velocity_fl * 0.3 + estimated_velocity_fl * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_fl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fl) ) * 0.2;
+		estimated_velocity_fr = (average_velocity_fr * 0.3 + estimated_velocity_fr * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_fr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fr) ) * 0.2;
+		estimated_velocity_rl = (average_velocity_rl * 0.3 + estimated_velocity_rl * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_rl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rl) ) * 0.2;
+		estimated_velocity_rr = (average_velocity_rr * 0.3 + estimated_velocity_rr * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_rr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rr) ) * 0.2;*/
+		debug(
+			Serial1.printf("%u %u %u %u %u %u %u %u\r\n",
+				average_velocity_fl,
+				//(5756667 / (wheel_encoder.time_fl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fl) ),
+				(5756667 / wheel_encoder.speed_fl),
+				average_velocity_fr,
+				//(5756667 / (wheel_encoder.time_fr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fr) ),
+				(5756667 / wheel_encoder.speed_fr),
+				average_velocity_rl,
+				//(5756667 / (wheel_encoder.time_rl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rl) )
+				(5756667 / wheel_encoder.speed_rl),
+				average_velocity_rr,
+				//(5756667 / (wheel_encoder.time_rr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rr) )
+				(5756667 / wheel_encoder.speed_rr)
+			)
+		);
+
+		encoder_sampling = 0;
+	}
+
+	if (encoder_average > 99) {
+		// Obtain average speed every 100ms.
+		int32_t encoder_val_fl = wheel_encoder.encoder_fl;
+		int32_t encoder_val_fr = wheel_encoder.encoder_fr;
+		int32_t encoder_val_rl = wheel_encoder.encoder_rl;
+		int32_t encoder_val_rr = wheel_encoder.encoder_rr;
+
+		average_velocity_fl = (encoder_val_fl - last_encoder_fl) * 115/2; // mm/s
+		average_velocity_fr = (encoder_val_fr - last_encoder_fr) * 115/2; // mm/s
+		average_velocity_rl = (encoder_val_rl - last_encoder_rl) * 115/2; // mm/s
+		average_velocity_rr = (encoder_val_rr - last_encoder_rr) * 115/2; // mm/s
+
+		//estimated_velocity_fl
+		last_encoder_fl = encoder_val_fl;
+		last_encoder_fr = encoder_val_fr;
+		last_encoder_rl = encoder_val_rl;
+		last_encoder_rr = encoder_val_rr;
+
+		encoder_average = 0;
+	}
+#else
 	// Encoder handler
 	if (wheel_encoder.time_elapsed > 9) { // therefore >= 10
 		noInterrupts();
@@ -802,6 +891,7 @@ void loop() {
 		send_packet(reinterpret_cast<union packet *>(&msg_encoder));
 		wheel_encoder_last = wheel_encoder_copy;
 	}
+#endif
 }
 
 int main() {
