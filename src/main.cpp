@@ -153,6 +153,7 @@ struct packet_message_encoder msg_encoder = {
 // Encoder struct
 #define SPEED_ARR_LENGTH 10
 #define ENCODER_TIMEOUT 100000 // us
+#define USE_ENCODER_CONSTRAIN 0
 #define ENCODER_TIME_CONSTRAIN 300 //us
 
 struct wheel_encoder_struct {
@@ -480,7 +481,11 @@ void isr_encoder_fl() {
 
 	// If stopped, start rotating again
 	// Yes, we lose one interrupt, but we have no idea about time_fl
+#if USE_ENCODER_CONSTRAIN == 1
 	if (wheel_encoder.rotating_fl && wheel_encoder.time_fl > ENCODER_TIME_CONSTRAIN) {
+#else
+	if (wheel_encoder.rotating_fl) {
+#endif
 		wheel_encoder.speed_fl_arr[wheel_encoder.speed_fl_arr_i++] = wheel_encoder.time_fl;
 		wheel_encoder.speed_fl_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -493,7 +498,11 @@ void isr_encoder_fl() {
 void isr_encoder_fr() {
     wheel_encoder.encoder_fr++;
 
+#if USE_ENCODER_CONSTRAIN == 1
 	if (wheel_encoder.rotating_fr && wheel_encoder.time_fr > ENCODER_TIME_CONSTRAIN) {
+#else
+	if (wheel_encoder.rotating_fr) {
+#endif
 		wheel_encoder.speed_fr_arr[wheel_encoder.speed_fr_arr_i++] = wheel_encoder.time_fr;
 		wheel_encoder.speed_fr_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -506,7 +515,11 @@ void isr_encoder_fr() {
 void isr_encoder_rl() {
     wheel_encoder.encoder_rl++;
 
+#if USE_ENCODER_CONSTRAIN == 1
 	if (wheel_encoder.rotating_rl && wheel_encoder.time_rl > ENCODER_TIME_CONSTRAIN) {
+#else
+	if (wheel_encoder.rotating_rl) {
+#endif
 		wheel_encoder.speed_rl_arr[wheel_encoder.speed_rl_arr_i++] = wheel_encoder.time_rl;
 		wheel_encoder.speed_rl_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -519,7 +532,11 @@ void isr_encoder_rl() {
 void isr_encoder_rr() {
     wheel_encoder.encoder_rr++;
 
+#if USE_ENCODER_CONSTRAIN == 1
 	if (wheel_encoder.rotating_rr && wheel_encoder.time_rr > ENCODER_TIME_CONSTRAIN) {
+#else
+	if (wheel_encoder.rotating_rr) {
+#endif
 		wheel_encoder.speed_rr_arr[wheel_encoder.speed_rr_arr_i++] = wheel_encoder.time_rr;
 		wheel_encoder.speed_rr_arr_i %= SPEED_ARR_LENGTH;
 	} else {
