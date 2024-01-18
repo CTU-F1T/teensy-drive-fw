@@ -173,7 +173,7 @@ struct packet_message_encoder msg_encoder = {
  *  (1e3 * 2 * PI * WHEEL_RADIUS * 1e3) / (2 * ENCODER_TEETH * t)
  */
 constexpr int32_t pulses_conversion_n = (1e6 * WHEEL_RADIUS) * PI;
-constexpr int32_t pulses_conversion_d = ENCODER_TEETH * ENCODER_AVERAGE_PERIOD;
+constexpr int32_t pulses_conversion_d = ENCODER_TEETH;
 /*
  * 2) Measuring time between interrupts
  *	We obtain `t` us between two pulses.
@@ -850,11 +850,12 @@ void loop() {
 		int32_t encoder_val_fr = wheel_encoder.encoder_fr;
 		int32_t encoder_val_rl = wheel_encoder.encoder_rl;
 		int32_t encoder_val_rr = wheel_encoder.encoder_rr;
+		int32_t average_time = encoder_average;
 
-		average_velocity_fl = (encoder_val_fl - last_encoder_fl) * pulses_conversion_n / pulses_conversion_d;
-		average_velocity_fr = (encoder_val_fr - last_encoder_fr) * pulses_conversion_n / pulses_conversion_d;
-		average_velocity_rl = (encoder_val_rl - last_encoder_rl) * pulses_conversion_n / pulses_conversion_d;
-		average_velocity_rr = (encoder_val_rr - last_encoder_rr) * pulses_conversion_n / pulses_conversion_d;
+		average_velocity_fl = (encoder_val_fl - last_encoder_fl) * pulses_conversion_n / pulses_conversion_d / average_time;
+		average_velocity_fr = (encoder_val_fr - last_encoder_fr) * pulses_conversion_n / pulses_conversion_d / average_time;
+		average_velocity_rl = (encoder_val_rl - last_encoder_rl) * pulses_conversion_n / pulses_conversion_d / average_time;
+		average_velocity_rr = (encoder_val_rr - last_encoder_rr) * pulses_conversion_n / pulses_conversion_d / average_time;
 
 		//estimated_velocity_fl
 		last_encoder_fl = encoder_val_fl;
