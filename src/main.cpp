@@ -156,7 +156,7 @@ struct packet_message_encoder msg_encoder = {
 #define NOT_IN_RANGE(lb, cur, ub) (cur < lb || ub < cur)
 
 // Measure servo delays
-#define DEBUG_SERVO_DELAYS 1
+#define DEBUG_SERVO_DELAYS 0
 #if DEBUG_SERVO_DELAYS == 1
 std::vector<int> servo_delays;
 
