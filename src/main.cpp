@@ -216,7 +216,7 @@ constexpr int32_t time_conversion = (1e9 * PI * WHEEL_RADIUS) / (ENCODER_TEETH);
 #define ENCODER_TIMEOUT 100000 // us
 #define USE_ENCODER_CONSTRAIN 0
 #define ENCODER_TIME_CONSTRAIN 300 //us
-#define DEBUG_MEASUREMENT 1
+#define DEBUG_MEASUREMENT 0
 
 struct wheel_encoder_struct {
 	// Position of encoders
@@ -298,9 +298,7 @@ inline void stop() {
 
 void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 #if DEBUG_SERVO_DELAYS == 1
-	//servo_delays.emplace_back(servo_timer);
-	int stimer = servo_timer;
-	Serial1.printf("%d,", stimer);
+	servo_delays.emplace_back(servo_timer);
 	servo_timer = 0;
 #else
 	debug(Serial1.printf(
@@ -814,11 +812,12 @@ void fake_messages_loop() {
 
 #if DEBUG_SERVO_DELAYS == 1
 void report_servo_delays() {
-	return;
+
 	if (servo_delays_report > 10000) {
 		std::vector<int> delays = servo_delays;
 
 		for (int delay : delays) {
+			if (delay == 0) break;
 			Serial1.printf("%d,", delay);
 		}
 
