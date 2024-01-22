@@ -578,9 +578,7 @@ void isr_encoder_fl() {
 #else
 	if (wheel_encoder.rotating_fl) {
 #endif
-#if DEBUG_MEASUREMENT == 1
-		wheel_encoder.speed_fl = wheel_encoder.time_fl;
-#endif
+		wheel_encoder.speed_fl = time_conversion / wheel_encoder.time_fl;
 		wheel_encoder.speed_fl_arr[wheel_encoder.speed_fl_arr_i++] = wheel_encoder.time_fl;
 		wheel_encoder.speed_fl_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -598,9 +596,7 @@ void isr_encoder_fr() {
 #else
 	if (wheel_encoder.rotating_fr) {
 #endif
-#if DEBUG_MEASUREMENT == 1
-		wheel_encoder.speed_fr = wheel_encoder.time_fr;
-#endif
+		wheel_encoder.speed_fr = time_conversion / wheel_encoder.time_fr;
 		wheel_encoder.speed_fr_arr[wheel_encoder.speed_fr_arr_i++] = wheel_encoder.time_fr;
 		wheel_encoder.speed_fr_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -618,9 +614,7 @@ void isr_encoder_rl() {
 #else
 	if (wheel_encoder.rotating_rl) {
 #endif
-#if DEBUG_MEASUREMENT == 1
-		wheel_encoder.speed_rl = wheel_encoder.time_rl;
-#endif
+		wheel_encoder.speed_rl = time_conversion / wheel_encoder.time_rl;
 		wheel_encoder.speed_rl_arr[wheel_encoder.speed_rl_arr_i++] = wheel_encoder.time_rl;
 		wheel_encoder.speed_rl_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -638,9 +632,7 @@ void isr_encoder_rr() {
 #else
 	if (wheel_encoder.rotating_rr) {
 #endif
-#if DEBUG_MEASUREMENT == 1
-		wheel_encoder.speed_rr = wheel_encoder.time_rr;
-#endif
+		wheel_encoder.speed_rr = time_conversion / wheel_encoder.time_rr;
 		wheel_encoder.speed_rr_arr[wheel_encoder.speed_rr_arr_i++] = wheel_encoder.time_rr;
 		wheel_encoder.speed_rr_arr_i %= SPEED_ARR_LENGTH;
 	} else {
