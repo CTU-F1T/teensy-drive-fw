@@ -242,12 +242,10 @@ struct wheel_encoder_struct {
 	volatile int32_t speed_rl_arr[SPEED_ARR_LENGTH];
 	volatile int32_t speed_rr_arr[SPEED_ARR_LENGTH];
 
-#if DEBUG_MEASUREMENT == 1
 	volatile int32_t speed_fl;
 	volatile int32_t speed_fr;
 	volatile int32_t speed_rl;
 	volatile int32_t speed_rr;
-#endif
 
 	volatile bool rotating_fl;
 	volatile bool rotating_fr;
@@ -259,8 +257,6 @@ struct wheel_encoder_struct wheel_encoder = {0};
 struct wheel_encoder_struct wheel_encoder_last = {0};
 struct wheel_encoder_struct wheel_encoder_copy;
 
-#if DEBUG_MEASUREMENT == 1
-elapsedMillis encoder_sampling;
 elapsedMillis encoder_average;
 
 volatile int32_t last_encoder_fl = 0;
@@ -278,6 +274,9 @@ volatile int32_t estimated_velocity_rl = 0;
 volatile int32_t last_encoder_rr = 0;
 volatile int32_t average_velocity_rr = 0;
 volatile int32_t estimated_velocity_rr = 0;
+
+#if DEBUG_MEASUREMENT == 1
+elapsedMillis encoder_sampling;
 #endif
 
 
@@ -901,7 +900,7 @@ void loop() {
 
 		encoder_sampling = 0;
 	}
-
+#else // DEBUG_MEASUREMENT != 1
 	if (encoder_average >= ENCODER_AVERAGE_PERIOD) {
 		// Obtain average speed every 100ms.
 		int32_t encoder_val_fl = wheel_encoder.encoder_fl;
@@ -923,7 +922,7 @@ void loop() {
 
 		encoder_average = 0;
 	}
-#else
+
 	// Encoder handler
 	if (wheel_encoder.time_elapsed > 9) { // therefore >= 10
 		noInterrupts();
@@ -946,48 +945,22 @@ void loop() {
 		*/
 
 		// Speed according to the difference in the encoder count.
-		msg_encoder.payload.fl_speed = (wheel_encoder_copy.encoder_fl - wheel_encoder_last.encoder_fl) * 1000 / wheel_encoder_copy.time_elapsed;
-		msg_encoder.payload.fr_speed = (wheel_encoder_copy.encoder_fr - wheel_encoder_last.encoder_fr) * 1000 / wheel_encoder_copy.time_elapsed;
-		msg_encoder.payload.rl_speed = (wheel_encoder_copy.encoder_rl - wheel_encoder_last.encoder_rl) * 1000 / wheel_encoder_copy.time_elapsed;
-		msg_encoder.payload.rr_speed = (wheel_encoder_copy.encoder_rr - wheel_encoder_last.encoder_rr) * 1000 / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.fl_speed = average_velocity_fl;
+		msg_encoder.payload.fr_speed = average_velocity_fr;
+		msg_encoder.payload.rl_speed = average_velocity_rl;
+		msg_encoder.payload.rr_speed = average_velocity_rr;
 
+		// Filtered speed
+		estimated_velocity_fl = (average_velocity_fl * 0.2 + estimated_velocity_fl * 0.8) * 0.98 + wheel_encoder.speed_fl * 0.02;
+		estimated_velocity_fr = (average_velocity_fr * 0.2 + estimated_velocity_fr * 0.8) * 0.98 + wheel_encoder.speed_fr * 0.02;
+		estimated_velocity_rl = (average_velocity_rl * 0.2 + estimated_velocity_rl * 0.8) * 0.98 + wheel_encoder.speed_rl * 0.02;
+		estimated_velocity_rr = (average_velocity_rr * 0.2 + estimated_velocity_rr * 0.8) * 0.98 + wheel_encoder.speed_rr * 0.02;
 
-		// Speed according to the time differences.
-		// As this one stutters a lot, it is averaged.
-		msg_encoder.payload.fl_speed2 = 0;
-		msg_encoder.payload.fr_speed2 = 0;
-		msg_encoder.payload.rl_speed2 = 0;
-		msg_encoder.payload.rr_speed2 = 0;
+		msg_encoder.payload.fl_speed2 = estimated_velocity_fl;
+		msg_encoder.payload.fr_speed2 = estimated_velocity_fr;
+		msg_encoder.payload.rl_speed2 = estimated_velocity_rl;
+		msg_encoder.payload.rr_speed2 = estimated_velocity_rr;
 
-
-		if (wheel_encoder_copy.rotating_fl && wheel_encoder_copy.time_fl > ENCODER_TIMEOUT) {
-			memset((void *)&wheel_encoder.speed_fl_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
-			wheel_encoder.rotating_fl = false;
-		}
-		if (wheel_encoder_copy.rotating_fr && wheel_encoder_copy.time_fr > ENCODER_TIMEOUT) {
-			memset((void *)&wheel_encoder.speed_fr_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
-			wheel_encoder.rotating_fr = false;
-		}
-		if (wheel_encoder_copy.rotating_rl && wheel_encoder_copy.time_rl > ENCODER_TIMEOUT) {
-			memset((void *)&wheel_encoder.speed_rl_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
-			wheel_encoder.rotating_rl = false;
-		}
-		if (wheel_encoder_copy.rotating_rr && wheel_encoder_copy.time_rr > ENCODER_TIMEOUT) {
-			memset((void *)&wheel_encoder.speed_rr_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
-			wheel_encoder.rotating_rr = false;
-		}
-
-		for (int i = 0; i < SPEED_ARR_LENGTH; i++) {
-			msg_encoder.payload.fl_speed2 += wheel_encoder_copy.speed_fl_arr[i];
-			msg_encoder.payload.fr_speed2 += wheel_encoder_copy.speed_fr_arr[i];
-			msg_encoder.payload.rl_speed2 += wheel_encoder_copy.speed_rl_arr[i];
-			msg_encoder.payload.rr_speed2 += wheel_encoder_copy.speed_rr_arr[i];
-		}
-
-		msg_encoder.payload.fl_speed2 /= SPEED_ARR_LENGTH;
-		msg_encoder.payload.fr_speed2 /= SPEED_ARR_LENGTH;
-		msg_encoder.payload.rl_speed2 /= SPEED_ARR_LENGTH;
-		msg_encoder.payload.rr_speed2 /= SPEED_ARR_LENGTH;
 
 		send_packet(reinterpret_cast<union packet *>(&msg_encoder));
 		wheel_encoder_last = wheel_encoder_copy;
