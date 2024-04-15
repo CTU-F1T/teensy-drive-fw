@@ -139,6 +139,8 @@ struct packet_message_encoder msg_encoder = {
 // Teensy 3.2 pin 4 == PTA13
 // not used directly (see setupFTM1)
 #define PIN_THROTTLE_INPUT 4
+// Teensy 3.2 pin 11 for GPIO DEBUG
+#define PIN_GPIO_DEBUG 11
 // Teensy 3.2 onboard orange LED pin 13 == PTC5
 #define PIN_LED 13
 // Teensy 3.2 pin 14 for VESC kill switch
@@ -660,6 +662,9 @@ void setup() {
 
 	pinMode(PIN_LED, OUTPUT);
 	digitalWrite(PIN_LED, LOW); // turn off the LED
+
+	pinMode(PIN_GPIO_DEBUG, OUTPUT);
+	digitalWrite(PIN_GPIO_DEBUG, LOW);
 
 	pinMode(PIN_KILL, OUTPUT);
 	digitalWrite(PIN_KILL, LOW);
