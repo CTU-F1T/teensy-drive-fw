@@ -281,6 +281,11 @@ volatile int32_t estimated_velocity_rr = 0;
 elapsedMillis encoder_sampling;
 #endif
 
+// Debug the communication; measure the latency
+#define DEBUG_COMMUNICATION_LATENCY 1
+#if DEBUG_COMMUNICATION_LATENCY == 1
+volatile bool gpio_toggle = false;
+#endif
 
 inline void send_emergency_stop() {
 	msg_estop.payload.data = true;
@@ -298,6 +303,10 @@ inline void stop() {
 }
 
 void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
+#if DEBUG_COMMUNICATION_LATENCY == 1
+	gpio_toggle = !gpio_toggle;
+	digitalWrite(PIN_GPIO_DEBUG, gpio_toggle ? HIGH : LOW);
+#endif
 #if DEBUG_SERVO_DELAYS == 1
 	servo_delays.emplace_back(servo_timer);
 	servo_timer = 0;
@@ -663,6 +672,7 @@ void setup() {
 	pinMode(PIN_LED, OUTPUT);
 	digitalWrite(PIN_LED, LOW); // turn off the LED
 
+	// Used only with DEBUG_COMMUNICATION_LATENCY
 	pinMode(PIN_GPIO_DEBUG, OUTPUT);
 	digitalWrite(PIN_GPIO_DEBUG, LOW);
 
