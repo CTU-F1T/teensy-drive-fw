@@ -1,8 +1,18 @@
 #include <Arduino.h>
+#include <vector>
 #include "version.h"
 #include "config.h"
 #include "protocol.h"
 #include "debug.h"
+
+// This is so STL things link.
+// https://forum.pjrc.com/index.php?threads/stl-and-undefined-reference-to-std-__throw_bad_alloc.49802/
+namespace std {
+void __throw_bad_alloc() {
+  Serial.println("Unable to allocate memory");
+  //while (true) {}
+}
+}
 
 // Input capture FTM register values
 #define FTM_SC_VALUE (FTM_SC_TOIE | FTM_SC_CLKS(1) | FTM_SC_PS(0))
@@ -145,14 +155,68 @@ struct packet_message_encoder msg_encoder = {
 #define IN_RANGE(lb, cur, ub) (lb < cur && cur < ub)
 #define NOT_IN_RANGE(lb, cur, ub) (cur < lb || ub < cur)
 
+// Measure servo delays
+#define DEBUG_SERVO_DELAYS 0
+#if DEBUG_SERVO_DELAYS == 1
+std::vector<int> servo_delays;
+
+elapsedMillis servo_delays_report;
+elapsedMicros servo_timer;
+#endif
 
 // Wheel encoder
 #define ENCODER_TEETH 30
+#define WHEEL_RADIUS 0.055		// [m]
+//#define PI 3.1415926535898 	// defined in teensy3/wiring.h
 #define ENCODER_TO_MMS (345400 / (2 * ENCODER_TEETH))
+#define ENCODER_AVERAGE_PERIOD 100	// [ms]
+#define ENCODER_SAMPLING_PERIOD 10	// [ms]
+
+/* Conversion of units.
+ *
+ * 1) Counting pulses
+ * 	We obtain `n` pulses in `t` (= ENCODER_AVERAGE_PERIOD) ms.
+ *  - This is given as difference in the wheel driven distance.
+ *  Estimated speed is `n/t` [pulses/ms].
+ *
+ *  To obtain [mm/s] we do this:
+ *  	* 1000 : [pulses/s]
+ *		/ (2 * ENCODER_TEETH) : [rotations/s]
+ *		* (2 * PI * WHEEL_RADIUS) : [m/s]
+ *		* 1000 : [mm/s]
+ *
+ *	Note: We work with mm/s to use only integers.
+ *
+ *  Long expression should be:
+ *  (1e3 * 2 * PI * WHEEL_RADIUS * 1e3) / (2 * ENCODER_TEETH * t)
+ */
+constexpr int32_t pulses_conversion_n = (1e6 * WHEEL_RADIUS) * PI;
+constexpr int32_t pulses_conversion_d = ENCODER_TEETH;
+/*
+ * 2) Measuring time between interrupts
+ *	We obtain `t` us between two pulses.
+ *  Estimated speed is then `1/t` [pulses/us].
+ *
+ *	To obtain [mm/s] we do this:
+ * 		* 1e6 : [pulses/s]
+ *		/ (2 * ENCODER_TEETH) : [rotations/s]
+ *		* (2 * PI * WHEEL_RADIUS) : [m/s]
+ *		* 1000 : [mm/s]
+ *
+ *	Similarly to (1) we work with mm/s to use only integers.
+ *
+ * 	Long expression should be:
+ *	(1 / t) * (1e6 * 2 * PI * WHEEL_RADIUS * 1e3) / (2 * ENCODER_TEETH)
+ */
+constexpr int32_t time_conversion = (1e9 * PI * WHEEL_RADIUS) / (ENCODER_TEETH);
 
 // Encoder struct
 #define SPEED_ARR_LENGTH 10
+#define USE_ENCODER_TIMEOUT 0
 #define ENCODER_TIMEOUT 100000 // us
+#define USE_ENCODER_CONSTRAIN 1
+#define ENCODER_TIME_CONSTRAIN 300 //us
+#define DEBUG_MEASUREMENT 0
 
 struct wheel_encoder_struct {
 	// Position of encoders
@@ -178,6 +242,11 @@ struct wheel_encoder_struct {
 	volatile int32_t speed_rl_arr[SPEED_ARR_LENGTH];
 	volatile int32_t speed_rr_arr[SPEED_ARR_LENGTH];
 
+	volatile int32_t speed_fl;
+	volatile int32_t speed_fr;
+	volatile int32_t speed_rl;
+	volatile int32_t speed_rr;
+
 	volatile bool rotating_fl;
 	volatile bool rotating_fr;
 	volatile bool rotating_rl;
@@ -187,6 +256,28 @@ struct wheel_encoder_struct {
 struct wheel_encoder_struct wheel_encoder = {0};
 struct wheel_encoder_struct wheel_encoder_last = {0};
 struct wheel_encoder_struct wheel_encoder_copy;
+
+elapsedMillis encoder_average;
+
+volatile int32_t last_encoder_fl = 0;
+volatile int32_t average_velocity_fl = 0;
+volatile int32_t estimated_velocity_fl = 0;
+
+volatile int32_t last_encoder_fr = 0;
+volatile int32_t average_velocity_fr = 0;
+volatile int32_t estimated_velocity_fr = 0;
+
+volatile int32_t last_encoder_rl = 0;
+volatile int32_t average_velocity_rl = 0;
+volatile int32_t estimated_velocity_rl = 0;
+
+volatile int32_t last_encoder_rr = 0;
+volatile int32_t average_velocity_rr = 0;
+volatile int32_t estimated_velocity_rr = 0;
+
+#if DEBUG_MEASUREMENT == 1
+elapsedMillis encoder_sampling;
+#endif
 
 
 inline void send_emergency_stop() {
@@ -205,12 +296,15 @@ inline void stop() {
 }
 
 void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
-
+#if DEBUG_SERVO_DELAYS == 1
+	servo_delays.emplace_back(servo_timer);
+	servo_timer = 0;
+#else
 	debug(Serial1.printf(
 		"hDPP: drive=%d angle=%d\n",
 		packet->payload.pwm_drive, packet->payload.pwm_angle
 	));
-
+#endif
 	int16_t pwm_drive = packet->payload.pwm_drive;
 	int16_t pwm_angle = packet->payload.pwm_angle;
 
@@ -272,9 +366,9 @@ void handleDrivePwmPacket(struct packet_message_drive_values *packet) {
 }
 
 void handleEmergencyStopPacket(struct packet_message_bool *packet) {
-
+#if DEBUG_SERVO_DELAYS == 0
 	debug(Serial1.printf("handleEmergencyStopPacket: %d\n", packet->payload.data));
-
+#endif
 	bool flagStop = packet->payload.data;
 
 	NVIC_DISABLE_IRQ(IRQ_FTM1);
@@ -297,9 +391,9 @@ void handleEmergencyStopPacket(struct packet_message_bool *packet) {
 }
 
 void handleVersionPacket(struct packet_message_version *packet) {
-
+#if DEBUG_SERVO_DELAYS == 0
 	debug(Serial1.printf("handleVersionPacket: %s\n", packet->payload.data));
-
+#endif
 	strcpy(msg_version.payload.data, VERSION);
 	send_packet(reinterpret_cast<union packet *>(&msg_version));
 
@@ -479,7 +573,12 @@ void isr_encoder_fl() {
 
 	// If stopped, start rotating again
 	// Yes, we lose one interrupt, but we have no idea about time_fl
+#if USE_ENCODER_CONSTRAIN == 1
+	if (wheel_encoder.rotating_fl && wheel_encoder.time_fl > ENCODER_TIME_CONSTRAIN) {
+#else
 	if (wheel_encoder.rotating_fl) {
+#endif
+		wheel_encoder.speed_fl = time_conversion / wheel_encoder.time_fl;
 		wheel_encoder.speed_fl_arr[wheel_encoder.speed_fl_arr_i++] = wheel_encoder.time_fl;
 		wheel_encoder.speed_fl_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -492,7 +591,12 @@ void isr_encoder_fl() {
 void isr_encoder_fr() {
     wheel_encoder.encoder_fr++;
 
+#if USE_ENCODER_CONSTRAIN == 1
+	if (wheel_encoder.rotating_fr && wheel_encoder.time_fr > ENCODER_TIME_CONSTRAIN) {
+#else
 	if (wheel_encoder.rotating_fr) {
+#endif
+		wheel_encoder.speed_fr = time_conversion / wheel_encoder.time_fr;
 		wheel_encoder.speed_fr_arr[wheel_encoder.speed_fr_arr_i++] = wheel_encoder.time_fr;
 		wheel_encoder.speed_fr_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -505,7 +609,12 @@ void isr_encoder_fr() {
 void isr_encoder_rl() {
     wheel_encoder.encoder_rl++;
 
+#if USE_ENCODER_CONSTRAIN == 1
+	if (wheel_encoder.rotating_rl && wheel_encoder.time_rl > ENCODER_TIME_CONSTRAIN) {
+#else
 	if (wheel_encoder.rotating_rl) {
+#endif
+		wheel_encoder.speed_rl = time_conversion / wheel_encoder.time_rl;
 		wheel_encoder.speed_rl_arr[wheel_encoder.speed_rl_arr_i++] = wheel_encoder.time_rl;
 		wheel_encoder.speed_rl_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -518,7 +627,12 @@ void isr_encoder_rl() {
 void isr_encoder_rr() {
     wheel_encoder.encoder_rr++;
 
+#if USE_ENCODER_CONSTRAIN == 1
+	if (wheel_encoder.rotating_rr && wheel_encoder.time_rr > ENCODER_TIME_CONSTRAIN) {
+#else
 	if (wheel_encoder.rotating_rr) {
+#endif
+		wheel_encoder.speed_rr = time_conversion / wheel_encoder.time_rr;
 		wheel_encoder.speed_rr_arr[wheel_encoder.speed_rr_arr_i++] = wheel_encoder.time_rr;
 		wheel_encoder.speed_rr_arr_i %= SPEED_ARR_LENGTH;
 	} else {
@@ -563,6 +677,10 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(PIN_WHEEL_RR), isr_encoder_rr, CHANGE);
 
 	pinMode(2, INPUT); // TODO: What purpose has pin 2? Maybe it is connected to the PCB?
+
+#if DEBUG_SERVO_DELAYS == 1
+	servo_delays.reserve(500);
+#endif
 
 	setupFTM1();
 
@@ -683,6 +801,26 @@ void fake_messages_loop() {
 
 }
 
+#if DEBUG_SERVO_DELAYS == 1
+void report_servo_delays() {
+
+	if (servo_delays_report > 10000) {
+		std::vector<int> delays = servo_delays;
+
+		for (int delay : delays) {
+			if (delay == 0) break;
+			Serial1.printf("%d,", delay);
+		}
+
+		Serial1.printf("\r\n");
+
+		servo_delays_report = 0;
+		servo_delays.clear();
+	}
+}
+#endif
+
+
 void loop() {
 
 	// static elapsedMillis last_pwm_high_elapsed;
@@ -716,6 +854,67 @@ void loop() {
 	}
 	NVIC_ENABLE_IRQ(IRQ_FTM1);
 
+
+#if DEBUG_MEASUREMENT == 1
+	if (encoder_sampling >= ENCODER_SAMPLING_PERIOD) {
+		/*estimated_velocity_fl = (average_velocity_fl * 0.3 + estimated_velocity_fl * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_fl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fl) ) * 0.2;
+		estimated_velocity_fr = (average_velocity_fr * 0.3 + estimated_velocity_fr * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_fr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fr) ) * 0.2;
+		estimated_velocity_rl = (average_velocity_rl * 0.3 + estimated_velocity_rl * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_rl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rl) ) * 0.2;
+		estimated_velocity_rr = (average_velocity_rr * 0.3 + estimated_velocity_rr * 0.7) * 0.8 + (5756667 / (wheel_encoder.time_rr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rr) ) * 0.2;*/
+		debug(
+			Serial1.printf("%u %u %u %u %u %u %u %u\r\n",
+				average_velocity_fl,
+#if USE_ENCODER_TIMEOUT == 1
+				(time_conversion / (wheel_encoder.time_fl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fl) ),
+#else
+				(time_conversion / wheel_encoder.speed_fl),
+#endif
+				average_velocity_fr,
+#if USE_ENCODER_TIMEOUT == 1
+				(time_conversion / (wheel_encoder.time_fr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_fr) ),
+#else
+				(time_conversion / wheel_encoder.speed_fr),
+#endif
+				average_velocity_rl,
+#if USE_ENCODER_TIMEOUT == 1
+				(time_conversion / (wheel_encoder.time_rl > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rl) ),
+#else
+				(time_conversion / wheel_encoder.speed_rl),
+#endif
+				average_velocity_rr,
+#if USE_ENCODER_TIMEOUT == 1
+				(time_conversion / (wheel_encoder.time_rr > ENCODER_TIMEOUT ? 0 : wheel_encoder.speed_rr) )
+#else
+				(time_conversion / wheel_encoder.speed_rr)
+#endif
+			)
+		);
+
+		encoder_sampling = 0;
+	}
+#else // DEBUG_MEASUREMENT != 1
+	if (encoder_average >= ENCODER_AVERAGE_PERIOD) {
+		// Obtain average speed every 100ms.
+		int32_t encoder_val_fl = wheel_encoder.encoder_fl;
+		int32_t encoder_val_fr = wheel_encoder.encoder_fr;
+		int32_t encoder_val_rl = wheel_encoder.encoder_rl;
+		int32_t encoder_val_rr = wheel_encoder.encoder_rr;
+		int32_t average_time = encoder_average;
+
+		average_velocity_fl = (encoder_val_fl - last_encoder_fl) * pulses_conversion_n / pulses_conversion_d / average_time;
+		average_velocity_fr = (encoder_val_fr - last_encoder_fr) * pulses_conversion_n / pulses_conversion_d / average_time;
+		average_velocity_rl = (encoder_val_rl - last_encoder_rl) * pulses_conversion_n / pulses_conversion_d / average_time;
+		average_velocity_rr = (encoder_val_rr - last_encoder_rr) * pulses_conversion_n / pulses_conversion_d / average_time;
+
+		//estimated_velocity_fl
+		last_encoder_fl = encoder_val_fl;
+		last_encoder_fr = encoder_val_fr;
+		last_encoder_rl = encoder_val_rl;
+		last_encoder_rr = encoder_val_rr;
+
+		encoder_average = 0;
+	}
+
 	// Encoder handler
 	if (wheel_encoder.time_elapsed > 9) { // therefore >= 10
 		noInterrupts();
@@ -738,52 +937,27 @@ void loop() {
 		*/
 
 		// Speed according to the difference in the encoder count.
-		msg_encoder.payload.fl_speed = (wheel_encoder_copy.encoder_fl - wheel_encoder_last.encoder_fl) * 1000 / wheel_encoder_copy.time_elapsed;
-		msg_encoder.payload.fr_speed = (wheel_encoder_copy.encoder_fr - wheel_encoder_last.encoder_fr) * 1000 / wheel_encoder_copy.time_elapsed;
-		msg_encoder.payload.rl_speed = (wheel_encoder_copy.encoder_rl - wheel_encoder_last.encoder_rl) * 1000 / wheel_encoder_copy.time_elapsed;
-		msg_encoder.payload.rr_speed = (wheel_encoder_copy.encoder_rr - wheel_encoder_last.encoder_rr) * 1000 / wheel_encoder_copy.time_elapsed;
+		msg_encoder.payload.fl_speed = average_velocity_fl;
+		msg_encoder.payload.fr_speed = average_velocity_fr;
+		msg_encoder.payload.rl_speed = average_velocity_rl;
+		msg_encoder.payload.rr_speed = average_velocity_rr;
 
+		// Filtered speed
+		estimated_velocity_fl = (average_velocity_fl * 0.2 + estimated_velocity_fl * 0.8) * 0.98 + wheel_encoder.speed_fl * 0.02;
+		estimated_velocity_fr = (average_velocity_fr * 0.2 + estimated_velocity_fr * 0.8) * 0.98 + wheel_encoder.speed_fr * 0.02;
+		estimated_velocity_rl = (average_velocity_rl * 0.2 + estimated_velocity_rl * 0.8) * 0.98 + wheel_encoder.speed_rl * 0.02;
+		estimated_velocity_rr = (average_velocity_rr * 0.2 + estimated_velocity_rr * 0.8) * 0.98 + wheel_encoder.speed_rr * 0.02;
 
-		// Speed according to the time differences.
-		// As this one stutters a lot, it is averaged.
-		msg_encoder.payload.fl_speed2 = 0;
-		msg_encoder.payload.fr_speed2 = 0;
-		msg_encoder.payload.rl_speed2 = 0;
-		msg_encoder.payload.rr_speed2 = 0;
+		msg_encoder.payload.fl_speed2 = estimated_velocity_fl;
+		msg_encoder.payload.fr_speed2 = estimated_velocity_fr;
+		msg_encoder.payload.rl_speed2 = estimated_velocity_rl;
+		msg_encoder.payload.rr_speed2 = estimated_velocity_rr;
 
-
-		if (wheel_encoder_copy.rotating_fl && wheel_encoder_copy.time_fl > ENCODER_TIMEOUT) {
-			memset((void *)&wheel_encoder.speed_fl_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
-			wheel_encoder.rotating_fl = false;
-		}
-		if (wheel_encoder_copy.rotating_fr && wheel_encoder_copy.time_fr > ENCODER_TIMEOUT) {
-			memset((void *)&wheel_encoder.speed_fr_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
-			wheel_encoder.rotating_fr = false;
-		}
-		if (wheel_encoder_copy.rotating_rl && wheel_encoder_copy.time_rl > ENCODER_TIMEOUT) {
-			memset((void *)&wheel_encoder.speed_rl_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
-			wheel_encoder.rotating_rl = false;
-		}
-		if (wheel_encoder_copy.rotating_rr && wheel_encoder_copy.time_rr > ENCODER_TIMEOUT) {
-			memset((void *)&wheel_encoder.speed_rr_arr, 0, sizeof(int32_t) * SPEED_ARR_LENGTH);
-			wheel_encoder.rotating_rr = false;
-		}
-
-		for (int i = 0; i < SPEED_ARR_LENGTH; i++) {
-			msg_encoder.payload.fl_speed2 += wheel_encoder_copy.speed_fl_arr[i];
-			msg_encoder.payload.fr_speed2 += wheel_encoder_copy.speed_fr_arr[i];
-			msg_encoder.payload.rl_speed2 += wheel_encoder_copy.speed_rl_arr[i];
-			msg_encoder.payload.rr_speed2 += wheel_encoder_copy.speed_rr_arr[i];
-		}
-
-		msg_encoder.payload.fl_speed2 /= SPEED_ARR_LENGTH;
-		msg_encoder.payload.fr_speed2 /= SPEED_ARR_LENGTH;
-		msg_encoder.payload.rl_speed2 /= SPEED_ARR_LENGTH;
-		msg_encoder.payload.rr_speed2 /= SPEED_ARR_LENGTH;
 
 		send_packet(reinterpret_cast<union packet *>(&msg_encoder));
 		wheel_encoder_last = wheel_encoder_copy;
 	}
+#endif
 }
 
 int main() {
@@ -798,6 +972,9 @@ int main() {
 
 	while (true) {
 		// fake_messages_loop();
+#if DEBUG_SERVO_DELAYS == 1
+		report_servo_delays();
+#endif
 		loop();
 		// yield(); // no need to call it as we are not interested in the events it produces
 	}

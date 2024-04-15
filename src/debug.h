@@ -2,7 +2,7 @@
 #define _TEENSY_DRIVE_DEBUG_H
 
 #ifndef DEBUG
-#define DEBUG 1
+#define DEBUG 0
 #endif
 
 #if DEBUG != 1
